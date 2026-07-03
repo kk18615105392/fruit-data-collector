@@ -1,3 +1,4 @@
+import { Media } from '@capacitor-community/media';
 import { Capacitor } from '@capacitor/core';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import type { FruitRecord } from './types';
@@ -29,11 +30,16 @@ function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
   ]);
 }
 
-function makeUniqueFileName(fileName: string): string {
-  const dot = fileName.lastIndexOf('.');
-  const base = dot >= 0 ? fileName.slice(0, dot) : fileName;
-  const ext = dot >= 0 ? fileName.slice(dot) : '.jpg';
-  return `${base}_${Date.now()}${ext}`;
+function makeStorageFileName(ext = 'jpg'): string {
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `img_${Date.now()}_${rand}.${ext}`;
+}
+
+function toErrorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return String(err);
 }
 
 async function ensureMetadataDir(): Promise<void> {
@@ -54,10 +60,8 @@ async function savePhotoToAppDir(dataUrl: string, safeName: string): Promise<str
   return `${METADATA_DIR}/${safeName}`;
 }
 
-async function savePhotoToGallery(dataUrl: string, safeName: string): Promise<void> {
-  const { Media } = await import('@capacitor-community/media');
-
-  const tempName = `tmp_${Date.now()}_${safeName}`;
+async function savePhotoToGallery(dataUrl: string, storageName: string): Promise<void> {
+  const tempName = `tmp_${Date.now()}_${storageName}`;
   await Filesystem.writeFile({
     path: tempName,
     data: dataUrlToBase64(dataUrl),
@@ -80,11 +84,11 @@ async function savePhotoToGallery(dataUrl: string, safeName: string): Promise<vo
     throw new Error(`无法创建相册「${PHONE_ALBUM_NAME}」`);
   }
 
-  const baseName = safeName.replace(/\.[^.]+$/, '');
+  const galleryName = storageName.replace(/\.[^.]+$/, '');
   await Media.savePhoto({
     path: uri,
     albumIdentifier: album.identifier,
-    fileName: baseName,
+    fileName: galleryName,
   });
 
   try {
@@ -95,26 +99,31 @@ async function savePhotoToGallery(dataUrl: string, safeName: string): Promise<vo
 }
 
 export async function savePhotoToPhone(dataUrl: string, fileName: string): Promise<string> {
-  const safeName = makeUniqueFileName(fileName.includes('.') ? fileName : `${fileName}.jpg`);
+  const ext = getExtensionFromDataUrl(dataUrl);
+  const storageName = makeStorageFileName(ext);
 
   if (Capacitor.isNativePlatform()) {
-    const appPath = await savePhotoToAppDir(dataUrl, safeName);
     try {
-      await savePhotoToGallery(dataUrl, safeName);
-    } catch {
-      // 相册保存失败时，应用目录副本仍可用于导出
+      const appPath = await savePhotoToAppDir(dataUrl, storageName);
+      try {
+        await savePhotoToGallery(dataUrl, storageName);
+      } catch (galleryErr) {
+        console.warn('相册保存失败，已保留应用目录副本', galleryErr);
+      }
+      return appPath;
+    } catch (err) {
+      throw new Error(`保存图片失败：${toErrorMessage(err)}`);
     }
-    return appPath;
   }
 
   const blob = await (await fetch(dataUrl)).blob();
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = safeName;
+  anchor.download = fileName.includes('.') ? fileName : `${fileName}.${ext}`;
   anchor.click();
   URL.revokeObjectURL(url);
-  return safeName;
+  return storageName;
 }
 
 export async function saveBatchMetadataToPhone(
@@ -170,16 +179,24 @@ export async function saveRecordsToPhone(records: FruitRecord[]): Promise<{
 
   for (const record of records) {
     const ext = getExtensionFromDataUrl(record.photoDataUrl);
-    const fileName = record.fileName?.includes('.') ? record.fileName : `${record.fileName ?? record.id}.${ext}`;
-    const savedPath = await withTimeout(savePhotoToPhone(record.photoDataUrl, fileName), '保存图片');
+    const displayName = record.fileName?.includes('.')
+      ? record.fileName
+      : `${record.fileName ?? record.id}.${ext}`;
+    const savedPath = await withTimeout(
+      savePhotoToPhone(record.photoDataUrl, displayName),
+      '保存图片',
+    );
     paths.push(savedPath);
     record.savedPath = savedPath;
-    record.fileName = savedPath.split('/').pop() ?? fileName;
   }
 
   if (Capacitor.isNativePlatform() && records.length > 0) {
-    const batchName = `batch_${Date.now()}`;
-    await withTimeout(saveBatchMetadataToPhone(records, batchName), '保存批次元数据');
+    try {
+      const batchName = `batch_${Date.now()}`;
+      await withTimeout(saveBatchMetadataToPhone(records, batchName), '保存批次元数据');
+    } catch (err) {
+      console.warn('批次元数据保存失败', err);
+    }
   }
 
   return {

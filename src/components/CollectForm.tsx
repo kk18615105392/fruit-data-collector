@@ -211,7 +211,12 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
       const batchId = uuidv4();
       const records = sessionPhotos.map((photo) => buildRecordFromPhoto(photo, form, batchId, lastDisease));
       const result = await saveRecordsToPhone(records);
-      const persisted = await compressRecordsForStorage(records);
+      let persisted = records;
+      try {
+        persisted = await compressRecordsForStorage(records);
+      } catch (compressErr) {
+        console.warn('缩略图压缩失败，改为保存原图引用', compressErr);
+      }
       onSaveBatch(persisted);
       const savedDisease = records.find((r) => r.disease)?.disease;
       if (savedDisease) {

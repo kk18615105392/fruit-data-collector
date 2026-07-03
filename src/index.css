@@ -25,6 +25,7 @@ body,
 #root {
   margin: 0;
   min-height: 100%;
+  overflow-x: hidden;
 }
 
 body {
@@ -46,10 +47,12 @@ button {
 }
 
 .app-shell {
+  width: 100%;
   max-width: 480px;
   margin: 0 auto;
   min-height: 100vh;
   padding: 16px 16px 120px;
+  overflow-x: hidden;
 }
 
 .tab-panel[hidden] {
@@ -192,6 +195,14 @@ button {
 }
 
 .btn-block {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.burst-actions .btn,
+.card > .btn-block {
+  display: block;
   width: 100%;
 }
 
@@ -299,12 +310,13 @@ button {
 
 .bottom-nav {
   position: fixed;
-  left: 50%;
+  left: 0;
+  right: 0;
   bottom: 16px;
-  transform: translateX(-50%);
   width: min(448px, calc(100% - 32px));
+  margin: 0 auto;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid var(--border);
@@ -312,15 +324,17 @@ button {
   padding: 8px;
   box-shadow: var(--shadow);
   backdrop-filter: blur(8px);
+  z-index: 100;
 }
 
 .nav-btn {
   border: none;
   background: transparent;
   border-radius: 12px;
-  padding: 10px 6px;
+  padding: 10px 4px;
   color: var(--text-muted);
   font-size: 0.78rem;
+  min-width: 0;
 }
 
 .nav-btn.active {
