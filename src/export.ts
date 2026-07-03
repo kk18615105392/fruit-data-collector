@@ -268,6 +268,11 @@ export async function exportDataset(options: ExportOptions): Promise<void> {
 }
 
 export async function takePhoto(source: 'prompt' | 'camera' = 'prompt'): Promise<string> {
+  const e2ePhoto = (globalThis as { __E2E_PHOTO_URL__?: string }).__E2E_PHOTO_URL__;
+  if (e2ePhoto) {
+    return e2ePhoto;
+  }
+
   const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera');
 
   const photo = await Promise.race([

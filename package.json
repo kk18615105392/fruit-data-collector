@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "cap:sync": "npm run build && npx cap sync",
     "cap:android": "npx cap open android",
-    "android:build": "npm run cap:sync && cd android && gradlew assembleDebug"
+    "android:build": "npm run cap:sync && cd android && gradlew assembleDebug",
+    "test:e2e": "npm run build && node scripts/e2e-test.mjs"
   },
   "dependencies": {
     "@capacitor-community/media": "^8.0.1",
