@@ -46,13 +46,11 @@ export default function App() {
     setViewMode('detail');
   };
 
-  const renderContent = () => {
-    if (activeTab === 'home') {
-      return <HomePage records={records} onNavigate={setActiveTab} />;
-    }
+  return (
+    <div className="app-shell">
+      {activeTab === 'home' && <HomePage records={records} onNavigate={setActiveTab} />}
 
-    if (activeTab === 'collect') {
-      return (
+      <div className="tab-panel" hidden={activeTab !== 'collect'}>
         <CollectForm
           editingRecord={viewMode === 'edit' && selectedRecord ? selectedRecord : undefined}
           onSave={handleSave}
@@ -61,16 +59,15 @@ export default function App() {
             viewMode === 'edit'
               ? () => {
                   setViewMode('detail');
+                  setActiveTab('list');
                 }
               : undefined
           }
         />
-      );
-    }
+      </div>
 
-    if (activeTab === 'list') {
-      if (viewMode === 'detail' && selectedRecord) {
-        return (
+      {activeTab === 'list' &&
+        (viewMode === 'detail' && selectedRecord ? (
           <RecordDetail
             record={selectedRecord}
             onEdit={() => {
@@ -87,18 +84,12 @@ export default function App() {
               setSelectedRecord(null);
             }}
           />
-        );
-      }
+        ) : (
+          <RecordList records={records} onSelect={handleSelectRecord} />
+        ))}
 
-      return <RecordList records={records} onSelect={handleSelectRecord} />;
-    }
+      {activeTab === 'export' && <ExportPage records={records} />}
 
-    return <ExportPage records={records} />;
-  };
-
-  return (
-    <div className="app-shell">
-      {renderContent()}
       <BottomNav
         activeTab={activeTab}
         onChange={(tab) => {

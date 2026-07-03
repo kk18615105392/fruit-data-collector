@@ -94,6 +94,14 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
     saveNamingSettings(namingSettings);
   }, [namingSettings]);
 
+  useEffect(() => {
+    if (editingRecord) {
+      setForm(formFromRecord(editingRecord));
+      setMessage(null);
+      setError(null);
+    }
+  }, [editingRecord]);
+
   const updateField = <K extends keyof FruitFormData>(key: K, value: FruitFormData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
