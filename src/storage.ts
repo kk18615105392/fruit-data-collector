@@ -1,0 +1,57 @@
+import { STORAGE_KEY } from './constants';
+import type { FruitRecord } from './types';
+
+export function loadRecords(): FruitRecord[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as FruitRecord[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveRecords(records: FruitRecord[]): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+}
+
+export function addRecord(record: FruitRecord): FruitRecord[] {
+  const records = loadRecords();
+  const next = [record, ...records];
+  saveRecords(next);
+  return next;
+}
+
+export function updateRecord(record: FruitRecord): FruitRecord[] {
+  const records = loadRecords();
+  const next = records.map((item) => (item.id === record.id ? record : item));
+  saveRecords(next);
+  return next;
+}
+
+export function deleteRecord(id: string): FruitRecord[] {
+  const records = loadRecords();
+  const next = records.filter((item) => item.id !== id);
+  saveRecords(next);
+  return next;
+}
+
+export function getRecordById(id: string): FruitRecord | undefined {
+  return loadRecords().find((item) => item.id === id);
+}
+
+export function getStats(records: FruitRecord[]) {
+  const categories = new Set(records.map((r) => r.category));
+  const withLocation = records.filter(
+    (r) => r.latitude != null && r.longitude != null,
+  ).length;
+  const withPhoto = records.filter((r) => r.photoDataUrl).length;
+
+  return {
+    total: records.length,
+    categories: categories.size,
+    withLocation,
+    withPhoto,
+  };
+}

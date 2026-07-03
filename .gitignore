@@ -1,0 +1,20 @@
+node_modules/
+dist/
+ios/
+.DS_Store
+*.log
+.env
+.env.local
+.idea/
+.vscode/
+*.apk
+*.aab
+
+# Android 构建缓存（android 源码需要提交）
+android/.gradle/
+android/.idea/
+android/build/
+android/app/build/
+android/local.properties
+android/.cxx/
+android/capacitor-cordova-android-plugins/build/
