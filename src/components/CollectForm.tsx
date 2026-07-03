@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { COLOR_OPTIONS, RIPENESS_OPTIONS, TROPICAL_FRUITS } from '../constants';
+import { COLOR_OPTIONS, PREVIOUS_DISEASE_VALUE, RIPENESS_OPTIONS, TROPICAL_FRUITS, UNKNOWN_DISEASE } from '../constants';
+import { formatPreviousDiseaseLabel, getDiseasesForFruit, resolveDisease, resolveFormForNaming } from '../disease';
 import { getPhoneSaveHint, saveRecordsToPhone } from '../fileStorage';
 import { getCurrentLocation, takePhoto } from '../export';
 import { buildPhotoFileName, NAMING_FIELD_LABELS, previewFileName } from '../naming';
 import { loadNamingSettings, saveNamingSettings } from '../namingSettings';
+import { loadLastDisease } from '../storage';
 import type { FruitFormData, FruitRecord, NamingField, NamingSettings, SessionPhoto } from '../types';
 import { EMPTY_FORM } from '../types';
 
@@ -24,6 +26,7 @@ function formFromRecord(record: FruitRecord): FruitFormData {
     weight: record.weight?.toString() ?? '',
     color: record.color ?? '',
     ripeness: record.ripeness ?? '',
+    disease: record.disease ?? '',
     notes: record.notes ?? '',
     latitude: record.latitude,
     longitude: record.longitude,
@@ -34,8 +37,10 @@ function buildRecordFromPhoto(
   photo: SessionPhoto,
   form: FruitFormData,
   batchId: string,
+  lastDisease: string | null,
 ): FruitRecord {
   const now = new Date().toISOString();
+  const disease = resolveDisease(form.disease, lastDisease);
   return {
     id: photo.id,
     fruitName: form.fruitName.trim() || form.category,
@@ -45,6 +50,7 @@ function buildRecordFromPhoto(
     weight: form.weight ? Number(form.weight) : undefined,
     color: form.color || undefined,
     ripeness: form.ripeness || undefined,
+    disease,
     notes: form.notes.trim() || undefined,
     latitude: form.latitude,
     longitude: form.longitude,
@@ -56,9 +62,13 @@ function buildRecordFromPhoto(
 
 export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCancel }: CollectFormProps) {
   const isEdit = Boolean(editingRecord);
-  const [form, setForm] = useState<FruitFormData>(() =>
-    editingRecord ? formFromRecord(editingRecord) : { ...EMPTY_FORM },
-  );
+  const [form, setForm] = useState<FruitFormData>(() => {
+    if (editingRecord) {
+      return formFromRecord(editingRecord);
+    }
+    const last = loadLastDisease();
+    return { ...EMPTY_FORM, disease: last ? PREVIOUS_DISEASE_VALUE : '' };
+  });
   const [namingSettings, setNamingSettings] = useState<NamingSettings>(() => loadNamingSettings());
   const [sessionPhotos, setSessionPhotos] = useState<SessionPhoto[]>([]);
   const [loadingPhoto, setLoadingPhoto] = useState(false);
@@ -67,11 +77,17 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showNaming, setShowNaming] = useState(false);
+  const [lastDisease, setLastDisease] = useState<string | null>(() => loadLastDisease());
+
+  const namingForm = useMemo(
+    () => resolveFormForNaming(form, lastDisease),
+    [form, lastDisease],
+  );
 
   const nextIndex = sessionPhotos.length + 1;
   const namePreview = useMemo(
-    () => previewFileName(form, namingSettings, nextIndex),
-    [form, namingSettings, nextIndex],
+    () => previewFileName(namingForm, namingSettings, nextIndex),
+    [namingForm, namingSettings, nextIndex],
   );
 
   useEffect(() => {
@@ -90,12 +106,14 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
     });
   };
 
-  const refreshSessionNames = (photos: SessionPhoto[], currentForm: FruitFormData, settings: NamingSettings) =>
-    photos.map((photo, idx) => ({
+  const refreshSessionNames = (photos: SessionPhoto[], currentForm: FruitFormData, settings: NamingSettings) => {
+    const resolved = resolveFormForNaming(currentForm, lastDisease);
+    return photos.map((photo, idx) => ({
       ...photo,
       index: idx + 1,
-      fileName: buildPhotoFileName(currentForm, idx + 1, settings),
+      fileName: buildPhotoFileName(resolved, idx + 1, settings),
     }));
+  };
 
   const handleBurstCapture = async () => {
     if (!form.category) {
@@ -108,7 +126,7 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
     try {
       const dataUrl = await takePhoto('camera');
       const index = sessionPhotos.length + 1;
-      const fileName = buildPhotoFileName(form, index, namingSettings);
+      const fileName = buildPhotoFileName(namingForm, index, namingSettings);
       const photo: SessionPhoto = { id: uuidv4(), dataUrl, fileName, index };
       setSessionPhotos((prev) => [...prev, photo]);
       setMessage(`已拍摄第 ${index} 张：${fileName}`);
@@ -130,7 +148,7 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
     try {
       const dataUrl = await takePhoto('prompt');
       const index = sessionPhotos.length + 1;
-      const fileName = buildPhotoFileName(form, index, namingSettings);
+      const fileName = buildPhotoFileName(namingForm, index, namingSettings);
       setSessionPhotos((prev) => [...prev, { id: uuidv4(), dataUrl, fileName, index }]);
       setMessage(`已添加第 ${index} 张`);
     } catch (err) {
@@ -179,12 +197,19 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
 
     try {
       const batchId = uuidv4();
-      const records = sessionPhotos.map((photo) => buildRecordFromPhoto(photo, form, batchId));
+      const records = sessionPhotos.map((photo) => buildRecordFromPhoto(photo, form, batchId, lastDisease));
       const result = await saveRecordsToPhone(records);
       onSaveBatch(records);
+      const savedDisease = records.find((r) => r.disease)?.disease;
+      if (savedDisease) {
+        setLastDisease(savedDisease);
+      }
       setSessionPhotos([]);
-      setForm({ ...EMPTY_FORM });
-      setMessage(`已保存 ${result.savedCount} 张到手机 ${result.folder}/，并同步到应用列表`);
+      setForm({
+        ...EMPTY_FORM,
+        disease: savedDisease ? PREVIOUS_DISEASE_VALUE : '',
+      });
+      setMessage(`已保存 ${result.savedCount} 张到相册「${result.folder}」，并同步到应用列表`);
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败');
     } finally {
@@ -200,9 +225,11 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
     }
 
     const now = new Date().toISOString();
+    const disease = resolveDisease(form.disease, lastDisease);
+    const resolvedForm = resolveFormForNaming(form, lastDisease);
     const fileName =
       form.customFileName.trim() !== ''
-        ? buildPhotoFileName(form, 1, namingSettings)
+        ? buildPhotoFileName(resolvedForm, 1, namingSettings)
         : editingRecord?.fileName;
 
     const record: FruitRecord = {
@@ -214,6 +241,7 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
       weight: form.weight ? Number(form.weight) : undefined,
       color: form.color || undefined,
       ripeness: form.ripeness || undefined,
+      disease,
       notes: form.notes.trim() || undefined,
       latitude: form.latitude,
       longitude: form.longitude,
@@ -234,7 +262,7 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
     if (!isEdit && sessionPhotos.length > 0) {
       setSessionPhotos((prev) => refreshSessionNames(prev, form, namingSettings));
     }
-  }, [form.category, form.fruitName, form.color, form.ripeness, form.weight, form.customFileName, namingSettings, isEdit]);
+  }, [form.category, form.fruitName, form.disease, form.color, form.ripeness, form.weight, form.customFileName, namingSettings, lastDisease, isEdit]);
 
   if (isEdit) {
     return (
@@ -247,7 +275,7 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
           <div className="photo-box" onClick={() => takePhoto('prompt').then((url) => updateField('photoDataUrl', url))}>
             <img src={form.photoDataUrl} alt="样本" />
           </div>
-          <AttributeFields form={form} updateField={updateField} />
+          <AttributeFields form={form} lastDisease={lastDisease} updateField={updateField} />
           <div className="form-group">
             <label htmlFor="customFileName">自定义文件名</label>
             <input
@@ -282,7 +310,7 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
 
       <div className="card">
         <h3 className="section-heading">1. 样本属性（应用于本批次全部照片）</h3>
-        <AttributeFields form={form} updateField={updateField} />
+        <AttributeFields form={form} lastDisease={lastDisease} updateField={updateField} />
         <button type="button" className="btn btn-secondary btn-block" onClick={handleGetLocation} disabled={loadingLocation}>
           {loadingLocation ? '定位中...' : '获取 GPS 定位'}
         </button>
@@ -403,15 +431,28 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
 
 interface AttributeFieldsProps {
   form: FruitFormData;
+  lastDisease: string | null;
   updateField: <K extends keyof FruitFormData>(key: K, value: FruitFormData[K]) => void;
 }
 
-function AttributeFields({ form, updateField }: AttributeFieldsProps) {
+function AttributeFields({ form, lastDisease, updateField }: AttributeFieldsProps) {
+  const diseaseOptions = form.category ? getDiseasesForFruit(form.category) : [];
+
+  const handleCategoryChange = (category: string) => {
+    updateField('category', category);
+    updateField('disease', lastDisease ? PREVIOUS_DISEASE_VALUE : '');
+  };
+
   return (
     <>
       <div className="form-group">
         <label htmlFor="category">水果种类 *</label>
-        <select id="category" value={form.category} onChange={(e) => updateField('category', e.target.value)} required>
+        <select
+          id="category"
+          value={form.category}
+          onChange={(e) => handleCategoryChange(e.target.value)}
+          required
+        >
           <option value="">请选择</option>
           {TROPICAL_FRUITS.map((fruit) => (
             <option key={fruit} value={fruit}>
@@ -420,6 +461,29 @@ function AttributeFields({ form, updateField }: AttributeFieldsProps) {
           ))}
         </select>
       </div>
+
+      {form.category && (
+        <div className="form-group">
+          <label htmlFor="disease">病害类型</label>
+          <select
+            id="disease"
+            value={form.disease}
+            onChange={(e) => updateField('disease', e.target.value)}
+          >
+            <option value="">请选择</option>
+            <option value={UNKNOWN_DISEASE}>未知（不清楚具体病害）</option>
+            <option value={PREVIOUS_DISEASE_VALUE}>{formatPreviousDiseaseLabel(lastDisease)}</option>
+            {diseaseOptions.map((disease) => (
+              <option key={disease} value={disease}>
+                {disease}
+              </option>
+            ))}
+          </select>
+          <p className="record-meta" style={{ marginTop: 6 }}>
+            不清楚病害可选「未知」；若与上一张相同，可选「上一个病害」快速沿用
+          </p>
+        </div>
+      )}
       <div className="form-group">
         <label htmlFor="fruitName">样本名称</label>
         <input

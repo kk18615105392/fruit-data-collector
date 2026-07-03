@@ -1,4 +1,4 @@
-import { STORAGE_KEY } from './constants';
+import { LAST_DISEASE_KEY, STORAGE_KEY } from './constants';
 import type { FruitRecord } from './types';
 
 export function loadRecords(): FruitRecord[] {
@@ -16,10 +16,22 @@ export function saveRecords(records: FruitRecord[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
 }
 
+export function loadLastDisease(): string | null {
+  return localStorage.getItem(LAST_DISEASE_KEY);
+}
+
+export function saveLastDisease(disease: string | undefined): void {
+  if (disease) {
+    localStorage.setItem(LAST_DISEASE_KEY, disease);
+  }
+}
+
 export function addRecords(newRecords: FruitRecord[]): FruitRecord[] {
   const records = loadRecords();
   const next = [...newRecords, ...records];
   saveRecords(next);
+  const latestDisease = newRecords.find((r) => r.disease)?.disease;
+  saveLastDisease(latestDisease);
   return next;
 }
 
@@ -27,6 +39,7 @@ export function addRecord(record: FruitRecord): FruitRecord[] {
   const records = loadRecords();
   const next = [record, ...records];
   saveRecords(next);
+  saveLastDisease(record.disease);
   return next;
 }
 

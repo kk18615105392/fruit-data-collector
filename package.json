@@ -13,6 +13,7 @@
     "android:build": "npm run cap:sync && cd android && gradlew assembleDebug"
   },
   "dependencies": {
+    "@capacitor-community/media": "^8.0.1",
     "@capacitor/android": "^7.0.0",
     "@capacitor/camera": "^7.0.0",
     "@capacitor/core": "^7.0.0",
@@ -30,6 +31,7 @@
     "@types/react-dom": "^18.3.1",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "playwright": "^1.61.1",
     "typescript": "^5.6.3",
     "vite": "^5.4.11"
   }

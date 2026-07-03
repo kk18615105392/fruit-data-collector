@@ -29,6 +29,7 @@ export interface ExportMetaItem {
   weight?: number;
   color?: string;
   ripeness?: string;
+  disease?: string;
   notes?: string;
   latitude?: number;
   longitude?: number;
@@ -62,6 +63,7 @@ export async function buildExportBundle(records: FruitRecord[]): Promise<ExportB
       weight: record.weight,
       color: record.color,
       ripeness: record.ripeness,
+      disease: record.disease,
       notes: record.notes,
       latitude: record.latitude,
       longitude: record.longitude,
@@ -112,7 +114,7 @@ export async function exportDatasetNative(records: FruitRecord[]): Promise<strin
   }
 
   const csvHeader =
-    'id,imageFile,fruitName,category,weight,color,ripeness,notes,latitude,longitude,createdAt,updatedAt';
+    'id,imageFile,fruitName,category,weight,color,ripeness,disease,notes,latitude,longitude,createdAt,updatedAt';
   const csvRows = bundle.records.map((item) =>
     [
       item.id,
@@ -122,6 +124,7 @@ export async function exportDatasetNative(records: FruitRecord[]): Promise<strin
       item.weight ?? '',
       item.color ?? '',
       item.ripeness ?? '',
+      item.disease ?? '',
       (item.notes ?? '').replace(/"/g, '""'),
       item.latitude ?? '',
       item.longitude ?? '',
@@ -144,14 +147,47 @@ export async function exportDatasetNative(records: FruitRecord[]): Promise<strin
     directory: Directory.Cache,
   });
 
-  await Share.share({
+  await shareExport({
     title: '热带水果数据集',
     text: `已导出 ${records.length} 条记录，包含 JSON、CSV 和图片文件`,
     url: jsonUri.uri,
-    dialogTitle: '分享数据集',
   });
 
   return jsonUri.uri;
+}
+
+async function shareExport(options: {
+  title: string;
+  text: string;
+  url: string;
+}): Promise<void> {
+  const canShare = await Share.canShare();
+  if (!canShare.value) {
+    throw new Error('当前设备不支持分享，导出文件已写入应用缓存');
+  }
+
+  try {
+    await Promise.race([
+      Share.share({
+        title: options.title,
+        text: options.text,
+        url: options.url,
+        dialogTitle: '分享数据集',
+      }),
+      new Promise<void>((_, reject) => {
+        setTimeout(() => reject(new Error('SHARE_TIMEOUT')), 90_000);
+      }),
+    ]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (
+      message === 'SHARE_TIMEOUT' ||
+      /cancel|dismiss|abort|closed|user/i.test(message)
+    ) {
+      return;
+    }
+    throw err;
+  }
 }
 
 export async function exportDatasetWeb(records: FruitRecord[]): Promise<void> {

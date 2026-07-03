@@ -3,6 +3,7 @@ export type Ripeness = '未熟' | '半熟' | '成熟' | '过熟';
 export type NamingField =
   | 'category'
   | 'fruitName'
+  | 'disease'
   | 'color'
   | 'ripeness'
   | 'weight'
@@ -26,6 +27,7 @@ export interface FruitRecord {
   weight?: number;
   color?: string;
   ripeness?: Ripeness;
+  disease?: string;
   notes?: string;
   latitude?: number;
   longitude?: number;
@@ -44,6 +46,7 @@ export interface FruitFormData {
   weight: string;
   color: string;
   ripeness: Ripeness | '';
+  disease: string;
   notes: string;
   latitude?: number;
   longitude?: number;
@@ -64,5 +67,6 @@ export const EMPTY_FORM: FruitFormData = {
   weight: '',
   color: '',
   ripeness: '',
+  disease: '',
   notes: '',
 };

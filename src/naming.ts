@@ -1,7 +1,7 @@
 import type { FruitFormData, NamingField, NamingSettings } from './types';
 
 export const DEFAULT_NAMING_SETTINGS: NamingSettings = {
-  fields: ['category', 'color', 'ripeness', 'index'],
+  fields: ['category', 'disease', 'color', 'ripeness', 'index'],
   customPrefix: '',
   customSuffix: '',
   separator: '_',
@@ -31,6 +31,8 @@ function getFieldValue(field: NamingField, form: FruitFormData, index: number): 
       return form.category;
     case 'fruitName':
       return form.fruitName.trim();
+    case 'disease':
+      return form.disease;
     case 'color':
       return form.color;
     case 'ripeness':
@@ -93,6 +95,7 @@ export function previewFileName(
 export const NAMING_FIELD_LABELS: Record<NamingField, string> = {
   category: '种类',
   fruitName: '样本名',
+  disease: '病害',
   color: '颜色',
   ripeness: '成熟度',
   weight: '重量',

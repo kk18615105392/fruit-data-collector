@@ -52,6 +52,10 @@ export default function RecordDetail({ record, onEdit, onDelete, onBack }: Recor
             <span className="detail-value">{record.color ?? '未填写'}</span>
           </div>
           <div className="detail-row">
+            <span className="detail-label">病害</span>
+            <span className="detail-value">{record.disease ?? '未填写'}</span>
+          </div>
+          <div className="detail-row">
             <span className="detail-label">成熟度</span>
             <span className="detail-value">{record.ripeness ?? '未填写'}</span>
           </div>
