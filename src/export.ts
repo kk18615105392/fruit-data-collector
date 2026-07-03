@@ -40,12 +40,29 @@ export interface ExportMetaItem {
 
 export interface ExportBundle {
   version: '1.0';
+  datasetName: string;
   exportedAt: string;
   totalRecords: number;
   records: ExportMetaItem[];
 }
 
-export async function buildExportBundle(records: FruitRecord[]): Promise<ExportBundle> {
+export interface ExportOptions {
+  datasetName: string;
+  records: FruitRecord[];
+}
+
+export function sanitizeExportName(name: string): string {
+  return (
+    name
+      .trim()
+      .replace(/[\\/:*?"<>|]/g, '_')
+      .replace(/\s+/g, '_')
+      .replace(/_+/g, '_')
+      .slice(0, 80) || `fruit_dataset_${Date.now()}`
+  );
+}
+
+export async function buildExportBundle(records: FruitRecord[], datasetName: string): Promise<ExportBundle> {
   const exportedAt = new Date().toISOString();
   const exportRecords: ExportMetaItem[] = records.map((record, index) => {
     const mime = getMimeType(record.photoDataUrl);
@@ -75,6 +92,7 @@ export async function buildExportBundle(records: FruitRecord[]): Promise<ExportB
 
   return {
     version: '1.0',
+    datasetName,
     exportedAt,
     totalRecords: records.length,
     records: exportRecords,
@@ -91,9 +109,11 @@ async function resolveRecordPhoto(record: FruitRecord): Promise<string> {
   return record.photoDataUrl;
 }
 
-export async function exportDatasetNative(records: FruitRecord[]): Promise<string> {
-  const bundle = await buildExportBundle(records);
-  const folderName = `fruit_dataset_${Date.now()}`;
+export async function exportDatasetNative(options: ExportOptions): Promise<string> {
+  const { records, datasetName } = options;
+  const safeName = sanitizeExportName(datasetName);
+  const bundle = await buildExportBundle(records, safeName);
+  const folderName = safeName;
 
   await Filesystem.mkdir({
     path: folderName,
@@ -160,8 +180,8 @@ export async function exportDatasetNative(records: FruitRecord[]): Promise<strin
   });
 
   await shareExport({
-    title: '热带水果数据集',
-    text: `已导出 ${records.length} 条记录，包含 JSON、CSV 和图片文件`,
+    title: safeName,
+    text: `已导出「${safeName}」共 ${records.length} 条记录，包含 JSON、CSV 和图片文件`,
     url: jsonUri.uri,
   });
 
@@ -202,8 +222,10 @@ async function shareExport(options: {
   }
 }
 
-export async function exportDatasetWeb(records: FruitRecord[]): Promise<void> {
-  const bundle = await buildExportBundle(records);
+export async function exportDatasetWeb(options: ExportOptions): Promise<void> {
+  const { records, datasetName } = options;
+  const safeName = sanitizeExportName(datasetName);
+  const bundle = await buildExportBundle(records, safeName);
   const exportRecords = await Promise.all(
     bundle.records.map(async (meta, index) => ({
       ...meta,
@@ -221,22 +243,28 @@ export async function exportDatasetWeb(records: FruitRecord[]): Promise<void> {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `tropical_fruit_dataset_${Date.now()}.json`;
+  anchor.download = `${safeName}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
 }
 
-export async function exportDataset(records: FruitRecord[]): Promise<void> {
+export async function exportDataset(options: ExportOptions): Promise<void> {
+  const { records, datasetName } = options;
+
+  if (!datasetName.trim()) {
+    throw new Error('请输入导出数据集名称');
+  }
+
   if (records.length === 0) {
-    throw new Error('没有可导出的数据');
+    throw new Error('请至少选择一个数据集');
   }
 
   if (Capacitor.isNativePlatform()) {
-    await exportDatasetNative(records);
+    await exportDatasetNative(options);
     return;
   }
 
-  await exportDatasetWeb(records);
+  await exportDatasetWeb(options);
 }
 
 export async function takePhoto(source: 'prompt' | 'camera' = 'prompt'): Promise<string> {

@@ -125,6 +125,67 @@ button {
   color: var(--text);
 }
 
+.btn-sm {
+  padding: 8px 12px;
+  font-size: 0.85rem;
+}
+
+.export-dataset-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.export-dataset-list {
+  display: grid;
+  gap: 10px;
+}
+
+.export-dataset-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  background: #fafcfa;
+}
+
+.export-dataset-item.selected {
+  border-color: var(--primary);
+  background: #f0f7f4;
+}
+
+.export-dataset-item input {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.export-dataset-thumb {
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #e8efe9;
+  flex-shrink: 0;
+}
+
+.export-dataset-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.export-dataset-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
 .btn-danger {
   background: #fde8ea;
   color: var(--danger);
