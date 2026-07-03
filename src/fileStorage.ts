@@ -1,4 +1,3 @@
-import { Media } from '@capacitor-community/media';
 import { Capacitor } from '@capacitor/core';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import type { FruitRecord } from './types';
@@ -7,6 +6,7 @@ export const PHONE_ALBUM_NAME = 'FruitCollector';
 export const PHONE_SAVE_DIR = PHONE_ALBUM_NAME;
 
 const METADATA_DIR = PHONE_SAVE_DIR;
+const SAVE_TIMEOUT_MS = 45_000;
 
 function dataUrlToBase64(dataUrl: string): string {
   const commaIndex = dataUrl.indexOf(',');
@@ -20,44 +20,27 @@ function getExtensionFromDataUrl(dataUrl: string): string {
   return 'jpg';
 }
 
+function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(`${label}超时，请重试`)), SAVE_TIMEOUT_MS);
+    }),
+  ]);
+}
+
+function makeUniqueFileName(fileName: string): string {
+  const dot = fileName.lastIndexOf('.');
+  const base = dot >= 0 ? fileName.slice(0, dot) : fileName;
+  const ext = dot >= 0 ? fileName.slice(dot) : '.jpg';
+  return `${base}_${Date.now()}${ext}`;
+}
+
 async function ensureMetadataDir(): Promise<void> {
   await Filesystem.mkdir({
     path: METADATA_DIR,
     directory: Directory.External,
     recursive: true,
-  });
-}
-
-let albumIdCache: string | null = null;
-
-async function ensureAlbum(): Promise<string> {
-  if (albumIdCache) return albumIdCache;
-
-  const { albums } = await Media.getAlbums();
-  const existing = albums.find((album) => album.name === PHONE_ALBUM_NAME);
-  if (existing) {
-    albumIdCache = existing.identifier;
-    return albumIdCache;
-  }
-
-  await Media.createAlbum({ name: PHONE_ALBUM_NAME });
-  const { albums: updated } = await Media.getAlbums();
-  const created = updated.find((album) => album.name === PHONE_ALBUM_NAME);
-  if (!created) {
-    throw new Error(`无法创建相册「${PHONE_ALBUM_NAME}」`);
-  }
-
-  albumIdCache = created.identifier;
-  return albumIdCache;
-}
-
-async function savePhotoToGallery(dataUrl: string, safeName: string): Promise<void> {
-  const albumId = await ensureAlbum();
-  const baseName = safeName.replace(/\.[^.]+$/, '');
-  await Media.savePhoto({
-    path: dataUrl,
-    albumIdentifier: albumId,
-    fileName: baseName,
   });
 }
 
@@ -68,24 +51,60 @@ async function savePhotoToAppDir(dataUrl: string, safeName: string): Promise<str
     data: dataUrlToBase64(dataUrl),
     directory: Directory.External,
   });
+  return `${METADATA_DIR}/${safeName}`;
+}
 
-  const uri = await Filesystem.getUri({
-    path: `${METADATA_DIR}/${safeName}`,
-    directory: Directory.External,
+async function savePhotoToGallery(dataUrl: string, safeName: string): Promise<void> {
+  const { Media } = await import('@capacitor-community/media');
+
+  const tempName = `tmp_${Date.now()}_${safeName}`;
+  await Filesystem.writeFile({
+    path: tempName,
+    data: dataUrlToBase64(dataUrl),
+    directory: Directory.Cache,
   });
-  return uri.uri;
+
+  const { uri } = await Filesystem.getUri({
+    path: tempName,
+    directory: Directory.Cache,
+  });
+
+  const { albums } = await Media.getAlbums();
+  let album = albums.find((item) => item.name === PHONE_ALBUM_NAME);
+  if (!album) {
+    await Media.createAlbum({ name: PHONE_ALBUM_NAME });
+    const refreshed = await Media.getAlbums();
+    album = refreshed.albums.find((item) => item.name === PHONE_ALBUM_NAME);
+  }
+  if (!album) {
+    throw new Error(`无法创建相册「${PHONE_ALBUM_NAME}」`);
+  }
+
+  const baseName = safeName.replace(/\.[^.]+$/, '');
+  await Media.savePhoto({
+    path: uri,
+    albumIdentifier: album.identifier,
+    fileName: baseName,
+  });
+
+  try {
+    await Filesystem.deleteFile({ path: tempName, directory: Directory.Cache });
+  } catch {
+    // 临时文件清理失败不影响主流程
+  }
 }
 
 export async function savePhotoToPhone(dataUrl: string, fileName: string): Promise<string> {
-  const safeName = fileName.includes('.') ? fileName : `${fileName}.jpg`;
+  const safeName = makeUniqueFileName(fileName.includes('.') ? fileName : `${fileName}.jpg`);
 
   if (Capacitor.isNativePlatform()) {
+    const appPath = await savePhotoToAppDir(dataUrl, safeName);
     try {
       await savePhotoToGallery(dataUrl, safeName);
-      return `Pictures/${PHONE_ALBUM_NAME}/${safeName}`;
     } catch {
-      return savePhotoToAppDir(dataUrl, safeName);
+      // 相册保存失败时，应用目录副本仍可用于导出
     }
+    return appPath;
   }
 
   const blob = await (await fetch(dataUrl)).blob();
@@ -152,15 +171,15 @@ export async function saveRecordsToPhone(records: FruitRecord[]): Promise<{
   for (const record of records) {
     const ext = getExtensionFromDataUrl(record.photoDataUrl);
     const fileName = record.fileName?.includes('.') ? record.fileName : `${record.fileName ?? record.id}.${ext}`;
-    const savedPath = await savePhotoToPhone(record.photoDataUrl, fileName);
+    const savedPath = await withTimeout(savePhotoToPhone(record.photoDataUrl, fileName), '保存图片');
     paths.push(savedPath);
     record.savedPath = savedPath;
-    record.fileName = fileName.split('/').pop() ?? fileName;
+    record.fileName = savedPath.split('/').pop() ?? fileName;
   }
 
   if (Capacitor.isNativePlatform() && records.length > 0) {
     const batchName = `batch_${Date.now()}`;
-    await saveBatchMetadataToPhone(records, batchName);
+    await withTimeout(saveBatchMetadataToPhone(records, batchName), '保存批次元数据');
   }
 
   return {
@@ -168,6 +187,22 @@ export async function saveRecordsToPhone(records: FruitRecord[]): Promise<{
     folder: PHONE_ALBUM_NAME,
     paths,
   };
+}
+
+export async function readPhotoFromSavedPath(savedPath: string): Promise<string | null> {
+  if (!Capacitor.isNativePlatform() || !savedPath) {
+    return null;
+  }
+
+  try {
+    const file = await Filesystem.readFile({
+      path: savedPath,
+      directory: Directory.External,
+    });
+    return `data:image/jpeg;base64,${file.data}`;
+  } catch {
+    return null;
+  }
 }
 
 export function getPhoneSaveHint(): string {

@@ -36,9 +36,6 @@ export default function App() {
   const handleSaveBatch = (batchRecords: FruitRecord[]) => {
     const next = addRecords(batchRecords);
     setRecords(next);
-    setActiveTab('list');
-    setViewMode('list');
-    setSelectedRecord(null);
   };
 
   const handleSelectRecord = (record: FruitRecord) => {

@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { readPhotoFromSavedPath } from './fileStorage';
 import type { FruitRecord } from './types';
 
 function dataUrlToBase64(dataUrl: string): string {
@@ -80,6 +81,16 @@ export async function buildExportBundle(records: FruitRecord[]): Promise<ExportB
   };
 }
 
+async function resolveRecordPhoto(record: FruitRecord): Promise<string> {
+  if (record.savedPath && Capacitor.isNativePlatform()) {
+    const fromDisk = await readPhotoFromSavedPath(record.savedPath);
+    if (fromDisk) {
+      return fromDisk;
+    }
+  }
+  return record.photoDataUrl;
+}
+
 export async function exportDatasetNative(records: FruitRecord[]): Promise<string> {
   const bundle = await buildExportBundle(records);
   const folderName = `fruit_dataset_${Date.now()}`;
@@ -106,9 +117,10 @@ export async function exportDatasetNative(records: FruitRecord[]): Promise<strin
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
     const meta = bundle.records[i];
+    const photoDataUrl = await resolveRecordPhoto(record);
     await Filesystem.writeFile({
       path: `${folderName}/${meta.imageFile}`,
-      data: dataUrlToBase64(record.photoDataUrl),
+      data: dataUrlToBase64(photoDataUrl),
       directory: Directory.Cache,
     });
   }
@@ -192,12 +204,15 @@ async function shareExport(options: {
 
 export async function exportDatasetWeb(records: FruitRecord[]): Promise<void> {
   const bundle = await buildExportBundle(records);
+  const exportRecords = await Promise.all(
+    bundle.records.map(async (meta, index) => ({
+      ...meta,
+      imageBase64: dataUrlToBase64(await resolveRecordPhoto(records[index])),
+    })),
+  );
   const exportData = {
     ...bundle,
-    records: bundle.records.map((meta, index) => ({
-      ...meta,
-      imageBase64: dataUrlToBase64(records[index].photoDataUrl),
-    })),
+    records: exportRecords,
   };
 
   const blob = new Blob([JSON.stringify(exportData, null, 2)], {
@@ -227,17 +242,22 @@ export async function exportDataset(records: FruitRecord[]): Promise<void> {
 export async function takePhoto(source: 'prompt' | 'camera' = 'prompt'): Promise<string> {
   const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera');
 
-  const photo = await Camera.getPhoto({
-    quality: 85,
-    allowEditing: false,
-    resultType: CameraResultType.DataUrl,
-    source: source === 'camera' ? CameraSource.Camera : CameraSource.Prompt,
-    saveToGallery: false,
-    promptLabelHeader: '选择图片来源',
-    promptLabelPhoto: '从相册选择',
-    promptLabelPicture: '拍照',
-    promptLabelCancel: '取消',
-  });
+  const photo = await Promise.race([
+    Camera.getPhoto({
+      quality: 80,
+      allowEditing: false,
+      resultType: CameraResultType.DataUrl,
+      source: source === 'camera' ? CameraSource.Camera : CameraSource.Prompt,
+      saveToGallery: false,
+      promptLabelHeader: '选择图片来源',
+      promptLabelPhoto: '从相册选择',
+      promptLabelPicture: '拍照',
+      promptLabelCancel: '取消',
+    }),
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('拍照超时，请重试')), 60_000);
+    }),
+  ]);
 
   if (!photo.dataUrl) {
     throw new Error('未获取到照片');

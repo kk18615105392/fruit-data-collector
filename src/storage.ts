@@ -13,7 +13,11 @@ export function loadRecords(): FruitRecord[] {
 }
 
 export function saveRecords(records: FruitRecord[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+  } catch {
+    throw new Error('本地存储空间不足，请导出后删除部分旧记录');
+  }
 }
 
 export function loadLastDisease(): string | null {

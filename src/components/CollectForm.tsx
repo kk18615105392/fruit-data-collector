@@ -6,6 +6,7 @@ import { getPhoneSaveHint, saveRecordsToPhone } from '../fileStorage';
 import { getCurrentLocation, takePhoto } from '../export';
 import { buildPhotoFileName, NAMING_FIELD_LABELS, previewFileName } from '../naming';
 import { loadNamingSettings, saveNamingSettings } from '../namingSettings';
+import { compressRecordsForStorage } from '../photoUtils';
 import { loadLastDisease } from '../storage';
 import type { FruitFormData, FruitRecord, NamingField, NamingSettings, SessionPhoto } from '../types';
 import { EMPTY_FORM } from '../types';
@@ -133,11 +134,12 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
     setError(null);
     try {
       const dataUrl = await takePhoto('camera');
-      const index = sessionPhotos.length + 1;
-      const fileName = buildPhotoFileName(namingForm, index, namingSettings);
-      const photo: SessionPhoto = { id: uuidv4(), dataUrl, fileName, index };
-      setSessionPhotos((prev) => [...prev, photo]);
-      setMessage(`已拍摄第 ${index} 张：${fileName}`);
+      setSessionPhotos((prev) => {
+        const index = prev.length + 1;
+        const fileName = buildPhotoFileName(namingForm, index, namingSettings);
+        setMessage(`已拍摄第 ${index} 张：${fileName}`);
+        return [...prev, { id: uuidv4(), dataUrl, fileName, index }];
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : '拍照失败');
     } finally {
@@ -155,10 +157,12 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
     setError(null);
     try {
       const dataUrl = await takePhoto('prompt');
-      const index = sessionPhotos.length + 1;
-      const fileName = buildPhotoFileName(namingForm, index, namingSettings);
-      setSessionPhotos((prev) => [...prev, { id: uuidv4(), dataUrl, fileName, index }]);
-      setMessage(`已添加第 ${index} 张`);
+      setSessionPhotos((prev) => {
+        const index = prev.length + 1;
+        const fileName = buildPhotoFileName(namingForm, index, namingSettings);
+        setMessage(`已添加第 ${index} 张`);
+        return [...prev, { id: uuidv4(), dataUrl, fileName, index }];
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : '选图失败');
     } finally {
@@ -207,7 +211,8 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
       const batchId = uuidv4();
       const records = sessionPhotos.map((photo) => buildRecordFromPhoto(photo, form, batchId, lastDisease));
       const result = await saveRecordsToPhone(records);
-      onSaveBatch(records);
+      const persisted = await compressRecordsForStorage(records);
+      onSaveBatch(persisted);
       const savedDisease = records.find((r) => r.disease)?.disease;
       if (savedDisease) {
         setLastDisease(savedDisease);
@@ -217,7 +222,7 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
         ...EMPTY_FORM,
         disease: savedDisease ? PREVIOUS_DISEASE_VALUE : '',
       });
-      setMessage(`已保存 ${result.savedCount} 张到相册「${result.folder}」，并同步到应用列表`);
+      setMessage(`已保存 ${result.savedCount} 张到相册「${result.folder}」，可继续采集下一批`);
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败');
     } finally {
