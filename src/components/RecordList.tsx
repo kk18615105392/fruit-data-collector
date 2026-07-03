@@ -76,7 +76,7 @@ export default function RecordList({ records, onSelect }: RecordListProps) {
                     {record.fruitName} · {record.category}
                   </p>
                   <p className="record-meta">
-                    {new Date(record.createdAt).toLocaleString('zh-CN')}
+                    {record.fileName ?? new Date(record.createdAt).toLocaleString('zh-CN')}
                     {record.ripeness ? ` · ${record.ripeness}` : ''}
                   </p>
                 </div>

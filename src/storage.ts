@@ -16,6 +16,13 @@ export function saveRecords(records: FruitRecord[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
 }
 
+export function addRecords(newRecords: FruitRecord[]): FruitRecord[] {
+  const records = loadRecords();
+  const next = [...newRecords, ...records];
+  saveRecords(next);
+  return next;
+}
+
 export function addRecord(record: FruitRecord): FruitRecord[] {
   const records = loadRecords();
   const next = [record, ...records];

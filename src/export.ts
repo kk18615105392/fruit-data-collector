@@ -22,6 +22,8 @@ function getExtension(mime: string): string {
 export interface ExportMetaItem {
   id: string;
   imageFile: string;
+  fileName?: string;
+  savedPath?: string;
   fruitName: string;
   category: string;
   weight?: number;
@@ -46,11 +48,15 @@ export async function buildExportBundle(records: FruitRecord[]): Promise<ExportB
   const exportRecords: ExportMetaItem[] = records.map((record, index) => {
     const mime = getMimeType(record.photoDataUrl);
     const ext = getExtension(mime);
-    const imageFile = `images/${String(index + 1).padStart(4, '0')}_${record.id.slice(0, 8)}.${ext}`;
+    const imageFile = record.fileName
+      ? `images/${record.fileName}`
+      : `images/${String(index + 1).padStart(4, '0')}_${record.id.slice(0, 8)}.${ext}`;
 
     return {
       id: record.id,
       imageFile,
+      fileName: record.fileName,
+      savedPath: record.savedPath,
       fruitName: record.fruitName,
       category: record.category,
       weight: record.weight,
@@ -182,14 +188,14 @@ export async function exportDataset(records: FruitRecord[]): Promise<void> {
   await exportDatasetWeb(records);
 }
 
-export async function takePhoto(): Promise<string> {
+export async function takePhoto(source: 'prompt' | 'camera' = 'prompt'): Promise<string> {
   const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera');
 
   const photo = await Camera.getPhoto({
     quality: 85,
     allowEditing: false,
     resultType: CameraResultType.DataUrl,
-    source: CameraSource.Prompt,
+    source: source === 'camera' ? CameraSource.Camera : CameraSource.Prompt,
     saveToGallery: false,
     promptLabelHeader: '选择图片来源',
     promptLabelPhoto: '从相册选择',

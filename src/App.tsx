@@ -5,7 +5,7 @@ import ExportPage from './components/ExportPage';
 import HomePage from './components/HomePage';
 import RecordDetail from './components/RecordDetail';
 import RecordList from './components/RecordList';
-import { addRecord, loadRecords, updateRecord } from './storage';
+import { addRecord, addRecords, loadRecords, updateRecord } from './storage';
 import type { FruitRecord, TabId } from './types';
 
 type ViewMode = 'list' | 'detail' | 'edit';
@@ -33,6 +33,14 @@ export default function App() {
     setSelectedRecord(null);
   };
 
+  const handleSaveBatch = (batchRecords: FruitRecord[]) => {
+    const next = addRecords(batchRecords);
+    setRecords(next);
+    setActiveTab('list');
+    setViewMode('list');
+    setSelectedRecord(null);
+  };
+
   const handleSelectRecord = (record: FruitRecord) => {
     setSelectedRecord(record);
     setViewMode('detail');
@@ -48,6 +56,7 @@ export default function App() {
         <CollectForm
           editingRecord={viewMode === 'edit' && selectedRecord ? selectedRecord : undefined}
           onSave={handleSave}
+          onSaveBatch={handleSaveBatch}
           onCancel={
             viewMode === 'edit'
               ? () => {

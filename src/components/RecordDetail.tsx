@@ -32,6 +32,14 @@ export default function RecordDetail({ record, onEdit, onDelete, onBack }: Recor
       <div className="card" style={{ marginTop: 12 }}>
         <div className="detail-grid">
           <div className="detail-row">
+            <span className="detail-label">文件名</span>
+            <span className="detail-value">{record.fileName ?? '未命名'}</span>
+          </div>
+          <div className="detail-row">
+            <span className="detail-label">手机路径</span>
+            <span className="detail-value">{record.savedPath ?? '未保存到手机'}</span>
+          </div>
+          <div className="detail-row">
             <span className="detail-label">样本 ID</span>
             <span className="detail-value">{record.id.slice(0, 8)}...</span>
           </div>

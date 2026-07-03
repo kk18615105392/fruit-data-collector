@@ -34,3 +34,4 @@ export const COLOR_OPTIONS = [
 ] as const;
 
 export const STORAGE_KEY = 'tropical_fruit_records_v1';
+export const NAMING_SETTINGS_KEY = 'tropical_fruit_naming_settings_v1';

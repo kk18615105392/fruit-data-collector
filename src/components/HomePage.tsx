@@ -14,7 +14,7 @@ export default function HomePage({ records, onNavigate }: HomePageProps) {
     <section>
       <div className="hero-banner">
         <h2>热带水果数据集采集器</h2>
-        <p>拍照、标注、定位，一键导出训练数据集</p>
+        <p>连续拍照 · 属性命名 · 一键保存到手机相册目录</p>
       </div>
 
       <div className="stat-grid">
