@@ -1,12 +1,15 @@
 import { Media } from '@capacitor-community/media';
 import { Capacitor } from '@capacitor/core';
-import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
+import { Directory, Filesystem } from '@capacitor/filesystem';
+import { writeFileSafe, writeTextFileSafe } from './fsUtils';
 import type { FruitRecord } from './types';
 
 export const PHONE_ALBUM_NAME = 'FruitCollector';
 export const PHONE_SAVE_DIR = PHONE_ALBUM_NAME;
 
-const METADATA_DIR = PHONE_SAVE_DIR;
+/** 应用私有目录，与相册名分离，避免 mkdir 冲突 */
+const APP_DATA_DIR = 'fruit_records';
+
 const SAVE_TIMEOUT_MS = 45_000;
 
 function dataUrlToBase64(dataUrl: string): string {
@@ -42,88 +45,95 @@ function toErrorMessage(err: unknown): string {
   return String(err);
 }
 
-async function ensureMetadataDir(): Promise<void> {
-  await Filesystem.mkdir({
-    path: METADATA_DIR,
-    directory: Directory.External,
-    recursive: true,
-  });
+async function ensureAlbum() {
+  const { albums } = await Media.getAlbums();
+  let album = albums.find((item) => item.name === PHONE_ALBUM_NAME);
+  if (album) {
+    return album;
+  }
+
+  try {
+    await Media.createAlbum({ name: PHONE_ALBUM_NAME });
+  } catch (err) {
+    console.warn('创建相册失败，尝试查找已有相册', err);
+  }
+
+  const refreshed = await Media.getAlbums();
+  album = refreshed.albums.find((item) => item.name === PHONE_ALBUM_NAME);
+  if (!album) {
+    throw new Error(`无法创建或找到相册「${PHONE_ALBUM_NAME}」，请检查相册/存储权限`);
+  }
+  return album;
 }
 
 async function savePhotoToAppDir(dataUrl: string, safeName: string): Promise<string> {
-  await ensureMetadataDir();
-  await Filesystem.writeFile({
-    path: `${METADATA_DIR}/${safeName}`,
+  const relativePath = `${APP_DATA_DIR}/${safeName}`;
+  await writeFileSafe({
+    path: relativePath,
     data: dataUrlToBase64(dataUrl),
-    directory: Directory.External,
+    directory: Directory.Data,
   });
-  return `${METADATA_DIR}/${safeName}`;
+  return relativePath;
 }
 
 async function savePhotoToGallery(dataUrl: string, storageName: string): Promise<void> {
-  const tempName = `tmp_${Date.now()}_${storageName}`;
-  await Filesystem.writeFile({
-    path: tempName,
-    data: dataUrlToBase64(dataUrl),
-    directory: Directory.Cache,
-  });
-
-  const { uri } = await Filesystem.getUri({
-    path: tempName,
-    directory: Directory.Cache,
-  });
-
-  const { albums } = await Media.getAlbums();
-  let album = albums.find((item) => item.name === PHONE_ALBUM_NAME);
-  if (!album) {
-    await Media.createAlbum({ name: PHONE_ALBUM_NAME });
-    const refreshed = await Media.getAlbums();
-    album = refreshed.albums.find((item) => item.name === PHONE_ALBUM_NAME);
-  }
-  if (!album) {
-    throw new Error(`无法创建相册「${PHONE_ALBUM_NAME}」`);
-  }
-
+  const album = await ensureAlbum();
   const galleryName = storageName.replace(/\.[^.]+$/, '');
   await Media.savePhoto({
-    path: uri,
+    path: dataUrl,
     albumIdentifier: album.identifier,
     fileName: galleryName,
   });
-
-  try {
-    await Filesystem.deleteFile({ path: tempName, directory: Directory.Cache });
-  } catch {
-    // 临时文件清理失败不影响主流程
-  }
 }
 
 export async function savePhotoToPhone(dataUrl: string, fileName: string): Promise<string> {
   const ext = getExtensionFromDataUrl(dataUrl);
   const storageName = makeStorageFileName(ext);
 
-  if (Capacitor.isNativePlatform()) {
-    try {
-      const appPath = await savePhotoToAppDir(dataUrl, storageName);
-      try {
-        await savePhotoToGallery(dataUrl, storageName);
-      } catch (galleryErr) {
-        console.warn('相册保存失败，已保留应用目录副本', galleryErr);
-      }
-      return appPath;
-    } catch (err) {
-      throw new Error(`保存图片失败：${toErrorMessage(err)}`);
-    }
+  if (!Capacitor.isNativePlatform()) {
+    const blob = await (await fetch(dataUrl)).blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName.includes('.') ? fileName : `${fileName}.${ext}`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    return storageName;
   }
 
-  const blob = await (await fetch(dataUrl)).blob();
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName.includes('.') ? fileName : `${fileName}.${ext}`;
-  anchor.click();
-  URL.revokeObjectURL(url);
-  return storageName;
+  let galleryOk = false;
+  let appOk = false;
+  let galleryErr: unknown;
+  let appErr: unknown;
+  let appPath = `${APP_DATA_DIR}/${storageName}`;
+
+  try {
+    await savePhotoToGallery(dataUrl, storageName);
+    galleryOk = true;
+  } catch (err) {
+    galleryErr = err;
+    console.warn('相册保存失败', err);
+  }
+
+  try {
+    appPath = await savePhotoToAppDir(dataUrl, storageName);
+    appOk = true;
+  } catch (err) {
+    appErr = err;
+    console.warn('应用目录保存失败', err);
+  }
+
+  if (!galleryOk && !appOk) {
+    const details = [
+      galleryErr ? `相册：${toErrorMessage(galleryErr)}` : null,
+      appErr ? `本地：${toErrorMessage(appErr)}` : null,
+    ]
+      .filter(Boolean)
+      .join('；');
+    throw new Error(`保存图片失败（${details}）`);
+  }
+
+  return appPath;
 }
 
 export async function saveBatchMetadataToPhone(
@@ -134,7 +144,6 @@ export async function saveBatchMetadataToPhone(
     return null;
   }
 
-  await ensureMetadataDir();
   const meta = {
     savedAt: new Date().toISOString(),
     folder: PHONE_ALBUM_NAME,
@@ -156,16 +165,12 @@ export async function saveBatchMetadataToPhone(
   };
 
   const jsonName = `${batchName}.json`;
-  await Filesystem.writeFile({
-    path: `${METADATA_DIR}/${jsonName}`,
-    data: JSON.stringify(meta, null, 2),
-    directory: Directory.External,
-    encoding: Encoding.UTF8,
-  });
+  const jsonPath = `${APP_DATA_DIR}/${jsonName}`;
+  await writeTextFileSafe(jsonPath, JSON.stringify(meta, null, 2), Directory.Data);
 
   const uri = await Filesystem.getUri({
-    path: `${METADATA_DIR}/${jsonName}`,
-    directory: Directory.External,
+    path: jsonPath,
+    directory: Directory.Data,
   });
   return uri.uri;
 }
@@ -211,15 +216,16 @@ export async function readPhotoFromSavedPath(savedPath: string): Promise<string 
     return null;
   }
 
-  try {
-    const file = await Filesystem.readFile({
-      path: savedPath,
-      directory: Directory.External,
-    });
-    return `data:image/jpeg;base64,${file.data}`;
-  } catch {
-    return null;
+  for (const directory of [Directory.Data, Directory.External]) {
+    try {
+      const file = await Filesystem.readFile({ path: savedPath, directory });
+      const ext = savedPath.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
+      return `data:image/${ext};base64,${file.data}`;
+    } catch {
+      // 尝试下一个目录（兼容旧版 External 路径）
+    }
   }
+  return null;
 }
 
 export function getPhoneSaveHint(): string {

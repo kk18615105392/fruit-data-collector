@@ -1,8 +1,10 @@
 /**
- * 从本地运行的采集 App 自动截取软著手册用图
- * 用法: node scripts/capture-screenshots.mjs
+ * 软著手册截图（手机视口、适中尺寸）
+ * 用法:
+ *   npx vite preview --host 127.0.0.1 --port 5175
+ *   node scripts/capture-screenshots.mjs
  */
-import { chromium, devices } from 'playwright';
+import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -10,7 +12,10 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const OUT_DIR = path.join(ROOT, 'data', '软著材料', 'screenshots');
-const BASE_URL = process.env.APP_URL || 'http://localhost:5175';
+const BASE_URL = process.env.APP_URL || 'http://127.0.0.1:5175';
+
+/** 手机视口：仅截可见区域，避免 fullPage 过长 */
+const VIEWPORT = { width: 390, height: 780 };
 
 const SCREENSHOTS = [
   { name: 'fig4-2-home.png', action: 'home' },
@@ -95,7 +100,7 @@ async function clickNav(page, label) {
 
 async function captureHome(page) {
   await page.goto(BASE_URL);
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(700);
 }
 
 async function captureCollect(page) {
@@ -105,6 +110,7 @@ async function captureCollect(page) {
   await page.selectOption('#color', '黄色');
   await page.selectOption('#ripeness', '成熟');
   await page.selectOption('#disease', { label: '炭疽病' });
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(500);
 }
 
@@ -120,6 +126,7 @@ async function captureCollectDisease(page) {
 async function captureList(page, dataUrl) {
   await seedData(page, dataUrl);
   await clickNav(page, '数据');
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(600);
 }
 
@@ -127,6 +134,7 @@ async function captureDetail(page, dataUrl) {
   await seedData(page, dataUrl);
   await clickNav(page, '数据');
   await page.getByRole('button').filter({ hasText: '台农芒果' }).first().click();
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(600);
 }
 
@@ -134,7 +142,7 @@ async function captureExport(page, dataUrl) {
   await seedData(page, dataUrl);
   await clickNav(page, '导出');
   await page.fill('#exportName', '芒果病害数据集_20260703');
-  await page.locator('.export-dataset-item').first().click();
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(600);
 }
 
@@ -147,9 +155,17 @@ async function main() {
   }
   const dataUrl = imageToDataUrl(sampleImage);
 
+  try {
+    const res = await fetch(BASE_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch {
+    throw new Error(`请先启动: npx vite preview --host 127.0.0.1 --port 5175`);
+  }
+
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
-    ...devices['Pixel 5'],
+    viewport: VIEWPORT,
+    deviceScaleFactor: 1,
     locale: 'zh-CN',
   });
   const page = await context.newPage();
@@ -166,11 +182,18 @@ async function main() {
   for (const item of SCREENSHOTS) {
     console.log(`截图: ${item.name} ...`);
     await actions[item.action]();
-    await page.screenshot({ path: path.join(OUT_DIR, item.name), fullPage: true });
+    await page.screenshot({
+      path: path.join(OUT_DIR, item.name),
+      fullPage: false,
+      type: 'png',
+    });
+    const stat = fs.statSync(path.join(OUT_DIR, item.name));
+    console.log(`  -> ${(stat.size / 1024).toFixed(0)} KB`);
   }
 
   await browser.close();
-  console.log(`\n完成，共 ${SCREENSHOTS.length} 张，保存至:\n${OUT_DIR}`);
+  console.log(`\n完成，共 ${SCREENSHOTS.length} 张（视口 ${VIEWPORT.width}x${VIEWPORT.height}）`);
+  console.log(OUT_DIR);
 }
 
 main().catch((err) => {

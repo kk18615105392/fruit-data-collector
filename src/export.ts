@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { readPhotoFromSavedPath } from './fileStorage';
+import { mkdirSafe } from './fsUtils';
 import type { FruitRecord } from './types';
 
 function dataUrlToBase64(dataUrl: string): string {
@@ -115,17 +116,8 @@ export async function exportDatasetNative(options: ExportOptions): Promise<strin
   const bundle = await buildExportBundle(records, safeName);
   const folderName = safeName;
 
-  await Filesystem.mkdir({
-    path: folderName,
-    directory: Directory.Cache,
-    recursive: true,
-  });
-
-  await Filesystem.mkdir({
-    path: `${folderName}/images`,
-    directory: Directory.Cache,
-    recursive: true,
-  });
+  await mkdirSafe(folderName, Directory.Cache);
+  await mkdirSafe(`${folderName}/images`, Directory.Cache);
 
   await Filesystem.writeFile({
     path: `${folderName}/dataset.json`,
