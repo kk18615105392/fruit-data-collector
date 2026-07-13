@@ -4,7 +4,7 @@ import type { FruitRecord } from '../types';
 
 interface HomePageProps {
   records: FruitRecord[];
-  onNavigate: (tab: 'collect' | 'list' | 'export') => void;
+  onNavigate: (tab: 'collect' | 'detect' | 'list' | 'export') => void;
 }
 
 export default function HomePage({ records, onNavigate }: HomePageProps) {
@@ -13,7 +13,7 @@ export default function HomePage({ records, onNavigate }: HomePageProps) {
   return (
     <section>
       <div className="hero-banner">
-        <h2>热带水果数据集采集器</h2>
+        <h2>热带水果采集APP</h2>
         <p>连续拍照 · 属性命名 · 一键保存到手机相册目录</p>
       </div>
 
@@ -50,10 +50,13 @@ export default function HomePage({ records, onNavigate }: HomePageProps) {
           <button type="button" className="btn btn-primary btn-block" onClick={() => onNavigate('collect')}>
             开始采集新样本
           </button>
+          <button type="button" className="btn btn-accent btn-block" onClick={() => onNavigate('detect')}>
+            番茄病虫害检测
+          </button>
           <button type="button" className="btn btn-secondary btn-block" onClick={() => onNavigate('list')}>
             查看已采集数据
           </button>
-          <button type="button" className="btn btn-accent btn-block" onClick={() => onNavigate('export')}>
+          <button type="button" className="btn btn-secondary btn-block" onClick={() => onNavigate('export')}>
             导出数据集
           </button>
         </div>

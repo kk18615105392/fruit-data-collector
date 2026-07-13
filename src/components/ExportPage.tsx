@@ -153,8 +153,24 @@ export default function ExportPage({ records }: ExportPageProps) {
             <span className="detail-value">便于 Excel / Pandas 分析</span>
           </div>
           <div className="detail-row">
+            <span className="detail-label">YOLO 标注</span>
+            <span className="detail-value">labels/*.txt + classes.txt + data.yaml</span>
+          </div>
+          <div className="detail-row">
+            <span className="detail-label">LabelImg</span>
+            <span className="detail-value">annotations/*.xml（Pascal VOC）</span>
+          </div>
+          <div className="detail-row">
+            <span className="detail-label">COCO JSON</span>
+            <span className="detail-value">coco/annotations.json（检测框）</span>
+          </div>
+          <div className="detail-row">
+            <span className="detail-label">图像分类</span>
+            <span className="detail-value">classification/类别名/图片（ImageFolder）</span>
+          </div>
+          <div className="detail-row">
             <span className="detail-label">图片文件</span>
-            <span className="detail-value">Android 端按文件夹导出</span>
+            <span className="detail-value">Android / Web 打包为 ZIP</span>
           </div>
         </div>
 
@@ -172,8 +188,8 @@ export default function ExportPage({ records }: ExportPageProps) {
       <div className="card" style={{ marginTop: 12 }}>
         <h3 style={{ marginTop: 0 }}>数据集格式说明</h3>
         <p className="record-meta">
-          每条记录包含：水果名称、种类标签、病害类型、图片、重量、颜色、成熟度、GPS 坐标、备注和时间戳。
-          导出的 JSON 可直接用于 YOLO、TensorFlow 等框架的数据预处理脚本。
+          导出 ZIP 包含：JSON/CSV 元数据、原图、YOLO 标签、LabelImg XML、COCO JSON（有框选时）、
+          以及按类别分文件夹的图像分类目录（classification/类别名/图片.jpg）。
         </p>
       </div>
     </section>

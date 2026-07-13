@@ -8,11 +8,15 @@ import { buildPhotoFileName, NAMING_FIELD_LABELS, previewFileName } from '../nam
 import { loadNamingSettings, saveNamingSettings } from '../namingSettings';
 import { compressRecordsForStorage } from '../photoUtils';
 import { loadLastDisease } from '../storage';
-import type { FruitFormData, FruitRecord, NamingField, NamingSettings, SessionPhoto } from '../types';
+import type { AnnotationBox, FruitFormData, FruitRecord, NamingField, NamingSettings, SessionPhoto } from '../types';
 import { EMPTY_FORM } from '../types';
+import AnnotationEditor from './AnnotationEditor';
+import AnnotationPreview from './AnnotationPreview';
 
 interface CollectFormProps {
   editingRecord?: FruitRecord;
+  detectPrefill?: { disease: string; photoDataUrl: string } | null;
+  onConsumeDetectPrefill?: () => void;
   onSave: (record: FruitRecord) => void;
   onSaveBatch: (records: FruitRecord[]) => void;
   onCancel?: () => void;
@@ -55,13 +59,23 @@ function buildRecordFromPhoto(
     notes: form.notes.trim() || undefined,
     latitude: form.latitude,
     longitude: form.longitude,
+    annotations: photo.annotations,
+    imageWidth: photo.imageWidth,
+    imageHeight: photo.imageHeight,
     batchId,
     createdAt: now,
     updatedAt: now,
   };
 }
 
-export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCancel }: CollectFormProps) {
+export default function CollectForm({
+  editingRecord,
+  detectPrefill,
+  onConsumeDetectPrefill,
+  onSave,
+  onSaveBatch,
+  onCancel,
+}: CollectFormProps) {
   const isEdit = Boolean(editingRecord);
   const [form, setForm] = useState<FruitFormData>(() => {
     if (editingRecord) {
@@ -79,6 +93,34 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
   const [error, setError] = useState<string | null>(null);
   const [showNaming, setShowNaming] = useState(false);
   const [lastDisease, setLastDisease] = useState<string | null>(() => loadLastDisease());
+  const [annotatingPhoto, setAnnotatingPhoto] = useState<SessionPhoto | null>(null);
+
+  const annotationClassOptions = useMemo(() => {
+    const set = new Set<string>();
+    if (form.category) {
+      set.add(form.category);
+      set.add(`${form.category}-健康`);
+    }
+    const disease = resolveDisease(form.disease, lastDisease);
+    if (disease) {
+      set.add(disease);
+    }
+    if (form.category) {
+      getDiseasesForFruit(form.category).forEach((item) => set.add(item));
+    }
+    return Array.from(set);
+  }, [form.category, form.disease, lastDisease]);
+
+  const defaultAnnotationClass = useMemo(() => {
+    const disease = resolveDisease(form.disease, lastDisease);
+    if (disease) {
+      return disease;
+    }
+    if (form.category) {
+      return `${form.category}-健康`;
+    }
+    return annotationClassOptions[0] ?? '目标';
+  }, [form.category, form.disease, lastDisease, annotationClassOptions]);
 
   const namingForm = useMemo(
     () => resolveFormForNaming(form, lastDisease),
@@ -102,6 +144,47 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
       setError(null);
     }
   }, [editingRecord]);
+
+  useEffect(() => {
+    if (!detectPrefill) {
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      category: prev.category || '番茄',
+      disease: detectPrefill.disease,
+      photoDataUrl: detectPrefill.photoDataUrl || prev.photoDataUrl,
+      fruitName: prev.fruitName || '番茄样本',
+    }));
+    setSessionPhotos((prev) => {
+      if (prev.length > 0 || !detectPrefill.photoDataUrl) {
+        return prev;
+      }
+      const fileName = buildPhotoFileName(
+        resolveFormForNaming(
+          {
+            ...EMPTY_FORM,
+            category: '番茄',
+            disease: detectPrefill.disease,
+            fruitName: '番茄样本',
+          },
+          lastDisease,
+        ),
+        1,
+        namingSettings,
+      );
+      return [
+        {
+          id: uuidv4(),
+          dataUrl: detectPrefill.photoDataUrl,
+          fileName,
+          index: 1,
+        },
+      ];
+    });
+    setMessage(`已从检测页带入病害「${detectPrefill.disease}」，可继续补全属性后保存`);
+    onConsumeDetectPrefill?.();
+  }, [detectPrefill, lastDisease, namingSettings, onConsumeDetectPrefill]);
 
   const updateField = <K extends keyof FruitFormData>(key: K, value: FruitFormData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -172,6 +255,25 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
 
   const handleRemovePhoto = (id: string) => {
     setSessionPhotos((prev) => refreshSessionNames(prev.filter((p) => p.id !== id), form, namingSettings));
+  };
+
+  const handleAnnotatePhoto = (photo: SessionPhoto) => {
+    setAnnotatingPhoto(photo);
+  };
+
+  const handleSaveAnnotations = (boxes: AnnotationBox[], imageWidth: number, imageHeight: number) => {
+    if (!annotatingPhoto) {
+      return;
+    }
+    setSessionPhotos((prev) =>
+      prev.map((photo) =>
+        photo.id === annotatingPhoto.id
+          ? { ...photo, annotations: boxes, imageWidth, imageHeight }
+          : photo,
+      ),
+    );
+    setAnnotatingPhoto(null);
+    setMessage(`已保存 ${boxes.length} 个标注框`);
   };
 
   const handleGetLocation = async () => {
@@ -318,6 +420,27 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
     );
   }
 
+  if (annotatingPhoto) {
+    return (
+      <section>
+        <h1 className="page-title">图像标注</h1>
+        <p className="page-subtitle">{annotatingPhoto.fileName}</p>
+        <div className="card">
+          <AnnotationEditor
+            imageSrc={annotatingPhoto.dataUrl}
+            classOptions={annotationClassOptions}
+            defaultClass={defaultAnnotationClass}
+            initialBoxes={annotatingPhoto.annotations}
+            initialWidth={annotatingPhoto.imageWidth}
+            initialHeight={annotatingPhoto.imageHeight}
+            onSave={handleSaveAnnotations}
+            onCancel={() => setAnnotatingPhoto(null)}
+          />
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section>
       <h1 className="page-title">连续采集</h1>
@@ -400,7 +523,8 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <h3 className="section-heading">3. 连续拍照（已拍 {sessionPhotos.length} 张）</h3>
+        <h3 className="section-heading">3. 连续拍照与标注（已拍 {sessionPhotos.length} 张）</h3>
+        <p className="record-meta">拍照后可点「标注」绘制检测框，导出时生成 YOLO / LabelImg 格式</p>
         <p className="record-meta">{getPhoneSaveHint()}</p>
 
         <div className="burst-actions">
@@ -416,13 +540,24 @@ export default function CollectForm({ editingRecord, onSave, onSaveBatch, onCanc
           <div className="photo-grid">
             {sessionPhotos.map((photo) => (
               <div key={photo.id} className="photo-grid-item">
-                <img src={photo.dataUrl} alt={photo.fileName} />
+                <AnnotationPreview
+                  src={photo.dataUrl}
+                  annotations={photo.annotations}
+                  compact
+                  fixedHeight={140}
+                />
                 <div className="photo-grid-meta">
                   <span className="photo-index">#{photo.index}</span>
                   <span className="photo-name" title={photo.fileName}>
                     {photo.fileName}
                   </span>
+                  {photo.annotations && photo.annotations.length > 0 && (
+                    <span className="photo-anno-badge">已标 {photo.annotations.length} 框</span>
+                  )}
                 </div>
+                <button type="button" className="photo-annotate" onClick={() => handleAnnotatePhoto(photo)}>
+                  标注
+                </button>
                 <button type="button" className="photo-remove" onClick={() => handleRemovePhoto(photo.id)}>
                   删除
                 </button>

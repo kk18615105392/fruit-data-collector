@@ -2,7 +2,7 @@
   "name": "tropical-fruit-collector",
   "version": "1.0.0",
   "private": true,
-  "description": "热带水果数据集采集应用",
+  "description": "热带水果采集APP",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,8 @@
     "cap:sync": "npm run build && npx cap sync",
     "cap:android": "npx cap open android",
     "android:build": "npm run cap:sync && cd android && gradlew assembleDebug",
-    "test:e2e": "npm run build && node scripts/e2e-test.mjs"
+    "test:e2e": "npm run build && node scripts/e2e-test.mjs",
+    "detect:tomato": "python scripts/detect_tomato_disease.py"
   },
   "dependencies": {
     "@capacitor-community/media": "^8.0.1",
@@ -22,8 +23,10 @@
     "@capacitor/geolocation": "^7.0.0",
     "@capacitor/share": "^7.0.0",
     "@capacitor/status-bar": "^7.0.0",
+    "onnxruntime-web": "^1.21.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "sharp": "^0.35.3",
     "uuid": "^11.0.3"
   },
   "devDependencies": {
@@ -32,6 +35,8 @@
     "@types/react-dom": "^18.3.1",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "docx": "^9.7.1",
+    "mammoth": "^1.12.0",
     "playwright": "^1.61.1",
     "typescript": "^5.6.3",
     "vite": "^5.4.11"

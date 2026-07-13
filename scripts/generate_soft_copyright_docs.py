@@ -11,7 +11,7 @@ from docx.shared import Pt, Cm
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "data" / "软著材料"
-SYSTEM_NAME = "热带水果数据集采集系统"
+SYSTEM_NAME = "热带水果采集APP"
 VERSION = "V1.0"
 FULL_NAME = f"{SYSTEM_NAME}{VERSION}"
 
@@ -26,6 +26,7 @@ SOURCE_FILES = [
     "src/namingSettings.ts",
     "src/photoUtils.ts",
     "src/fileStorage.ts",
+    "src/fsUtils.ts",
     "src/exportGroups.ts",
     "src/export.ts",
     "src/components/CollectForm.tsx",
@@ -70,6 +71,57 @@ def add_body(doc: Document, text: str) -> None:
         p.paragraph_format.line_spacing = 1.5
 
 
+def _style_table_cell(cell, *, bold: bool = False, align_center: bool = True) -> None:
+    for paragraph in cell.paragraphs:
+        if align_center:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in paragraph.runs:
+            run.bold = bold
+            run.font.name = "宋体"
+            run._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+            run.font.size = Pt(12)
+
+
+def add_table_caption(doc: Document, text: str) -> None:
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(text)
+    run.bold = True
+    run.font.name = "黑体"
+    run._element.rPr.rFonts.set(qn("w:eastAsia"), "黑体")
+    run.font.size = Pt(12)
+
+
+def save_doc(doc: Document, path: Path) -> Path:
+    try:
+        doc.save(str(path))
+        return path
+    except PermissionError:
+        alt = path.with_stem(f"{path.stem}-更新")
+        doc.save(str(alt))
+        print(f"原文件被占用，已另存: {alt.name}")
+        return alt
+
+
+def add_data_table(doc: Document, headers: list[str], rows: list[list[str]]) -> None:
+    table = doc.add_table(rows=1 + len(rows), cols=len(headers))
+    table.style = "Table Grid"
+    table.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    for col_idx, header in enumerate(headers):
+        cell = table.rows[0].cells[col_idx]
+        cell.text = header
+        _style_table_cell(cell, bold=True)
+
+    for row_idx, row_data in enumerate(rows):
+        for col_idx, value in enumerate(row_data):
+            cell = table.rows[row_idx + 1].cells[col_idx]
+            cell.text = value
+            _style_table_cell(cell)
+
+    doc.add_paragraph()
+
+
 def generate_source_code_doc() -> Path:
     doc = Document()
     set_doc_style(doc)
@@ -84,8 +136,7 @@ def generate_source_code_doc() -> Path:
         doc.add_paragraph(content)
 
     out = OUT_DIR / f"{SYSTEM_NAME}-源代码.docx"
-    doc.save(out)
-    return out
+    return save_doc(doc, out)
 
 
 def generate_user_manual() -> Path:
@@ -98,7 +149,7 @@ def generate_user_manual() -> Path:
     add_body(
         doc,
         """
-本手册是《热带水果数据集采集系统 V1.0》的配套使用说明，旨在帮助农业科研人员、数据集标注人员、智慧农业项目工作人员及相关从业者全面了解系统的功能定位、核心技术、操作流程与实际应用场景。通过本手册，用户可快速掌握如何利用移动端应用实现热带水果图像样本的连续采集、病害标注、多维属性记录、按规则命名保存及数据集导出，解决传统人工记录分散、命名不规范、病害标签缺失、图片与标签难以统一管理的问题，为机器学习模型训练、病害识别研究及种质资源调查提供标准化数据支撑。
+本手册是《热带水果采集APP V1.0》的配套使用说明，旨在帮助农业科研人员、数据集标注人员、智慧农业项目工作人员及相关从业者全面了解软件的功能定位、核心技术、操作流程与实际应用场景。通过本手册，用户可快速掌握如何利用移动端应用实现热带水果图像样本的连续采集、病害标注、多维属性记录、按规则命名保存及数据集导出，解决传统人工记录分散、命名不规范、病害标签缺失、图片与标签难以统一管理的问题，为机器学习模型训练、病害识别研究及种质资源调查提供标准化数据支撑。
         """,
     )
 
@@ -108,7 +159,7 @@ def generate_user_manual() -> Path:
         """
 在热带水果种质资源研究、病害识别模型训练及智慧农业示范项目中，高质量标注数据集是算法研发的基础。传统数据采集方式依赖相机拍照后再用 Excel 或纸质表格记录，存在以下问题：一是图片与标签分离，后期整理成本高；二是文件命名随意，难以批量导入训练框架；三是现场采集效率低，无法连续快速录入多个样本；四是缺乏病害类型、GPS、成熟度等结构化字段，数据价值受限；五是现场人员难以准确判断病害时缺少「未知」等标准化标注选项。
 
-为解决上述痛点，本系统面向 Android 移动终端，构建了一套集「连续拍照—病害标注—属性记录—规则命名—本地存储—批量导出」于一体的热带水果数据集采集应用。系统内置芒果、菠萝、火龙果、榴莲、山竹等 18 种常见热带水果类别，每种水果均配置常见病害选项；支持选择「未知」表示不确定病害类型，支持「上一个病害」快速沿用最近标签。系统同时支持颜色、成熟度、重量、备注及定位信息采集，并可将样本直接保存至手机 FruitCollector 相册，同时生成 JSON、CSV 格式数据集，适用于 YOLO、TensorFlow 等深度学习框架的数据预处理流程。
+为解决上述痛点，本软件面向 Android 移动终端，构建了一套集「连续拍照—病害标注—属性记录—规则命名—本地存储—批量导出」于一体的热带水果采集应用。软件内置芒果、菠萝、火龙果、榴莲、山竹等 18 种常见热带水果类别，每种水果均配置常见病害选项；支持选择「未知」表示不确定病害类型，支持「上一个病害」快速沿用最近标签。软件同时支持颜色、成熟度、重量、备注及定位信息采集，并可将样本直接保存至手机 FruitCollector 相册，同时生成 JSON、CSV 格式数据集，适用于 YOLO、TensorFlow 等深度学习框架的数据预处理流程。
         """,
     )
 
@@ -130,7 +181,7 @@ def generate_user_manual() -> Path:
     add_body(
         doc,
         """
-热带水果数据集采集系统是一套专注于热带水果图像样本采集与管理的移动应用，融合 React 跨平台前端与 Capacitor 原生能力，具备以下核心功能：
+热带水果采集APP是一套专注于热带水果图像样本采集与管理的移动应用，融合 React 跨平台前端与 Capacitor 原生能力，具备以下核心功能：
 
 连续采集模式：用户先设置本批次样本属性（种类、病害、颜色、成熟度等），再通过「继续拍照」按钮连续拍摄多张水果照片，无需重复填写公共字段，适合批量现场采样；
 
@@ -138,7 +189,7 @@ def generate_user_manual() -> Path:
 
 智能文件命名：系统支持按种类、病害、样本名、颜色、成熟度、重量、序号、时间戳等字段组合自动生成文件名，例如「芒果_炭疽病_黄色_成熟_001.jpg」，并支持名称前缀、后缀及自定义文件名覆盖；
 
-手机本地存储：保存时将图片写入手机相册「FruitCollector」及应用外部目录，同时生成 batch_xxx.json 批次元数据文件，可在图库或文件管理器中查看；
+手机本地存储：保存时优先写入手机相册「FruitCollector」，同时在应用私有目录保留原图副本及 batch_xxx.json 批次元数据，可在图库或应用数据中查看；
 
 多维样本标注：每条样本包含水果种类、病害类型、重量、颜色、成熟度、GPS 坐标、备注及时间戳，满足病害识别与品质分析模型训练对标签丰富度的要求；
 
@@ -148,21 +199,32 @@ def generate_user_manual() -> Path:
 
     add_heading(doc, "3. 运行环境", 1)
     add_heading(doc, "3.1 硬件运行环境", 2)
-    add_body(doc, "表1 硬件运行环境\n\n选项\t要求\n处理器\tARM 64 位及以上移动处理器\n内存\t2GB 及以上\n存储空间\t100MB 应用安装空间；采集数据另计\n摄像头\t支持后置/前置相机\n定位\t支持 GPS 或网络定位（可选）\n网络\t导出与云端构建需网络；现场采集可离线")
+    add_table_caption(doc, "表1 硬件运行环境")
+    add_data_table(
+        doc,
+        ["选项", "要求"],
+        [
+            ["处理器", "ARM 64 位及以上移动处理器"],
+            ["内存", "2GB 及以上"],
+            ["存储空间", "100MB 应用安装空间；采集数据另计"],
+            ["摄像头", "支持后置/前置相机"],
+            ["定位", "支持 GPS 或网络定位（可选）"],
+            ["网络", "导出与云端构建需网络；现场采集可离线"],
+        ],
+    )
 
     add_heading(doc, "3.2 系统运行环境", 2)
-    add_body(
+    add_table_caption(doc, "表2 系统运行环境")
+    add_data_table(
         doc,
-        """
-表2 系统运行环境
-
-用途\t要求
-操作系统\tAndroid 6.0（API 23）及以上
-应用形式\tAndroid APK 安装包
-开发框架\tReact 18 + TypeScript + Vite
-原生容器\tCapacitor 7
-本地存储\tLocalStorage + Android 文件系统
-        """,
+        ["用途", "要求"],
+        [
+            ["操作系统", "Android 6.0（API 23）及以上"],
+            ["应用形式", "Android APK 安装包"],
+            ["开发框架", "React 18 + TypeScript + Vite"],
+            ["原生容器", "Capacitor 7"],
+            ["本地存储", "LocalStorage + Android 文件系统"],
+        ],
     )
 
     add_heading(doc, "4. 系统架构设计", 1)
@@ -170,9 +232,9 @@ def generate_user_manual() -> Path:
     add_body(
         doc,
         """
-热带水果数据集采集系统基于模块化设计思想构建，主要划分为以下核心功能模块：
+热带水果采集APP基于模块化设计思想构建，主要划分为以下核心功能模块：
 
-图4-1 热带水果数据集采集系统功能模块
+图4-1 热带水果采集APP功能模块
 
 （1）首页统计模块：展示已采集样本总数、水果种类数、含图片样本数、含定位样本数，并提供快速入口跳转至采集、列表与导出页面。
 
@@ -182,7 +244,7 @@ def generate_user_manual() -> Path:
 
 （4）数据管理模块：以卡片列表形式展示历史样本，支持按种类筛选与关键词搜索，进入详情页可查看文件名、病害、手机保存路径、批次 ID、图片及全部标注字段，并支持编辑与删除。
 
-（5）文件存储模块：通过 Capacitor Media 与 Filesystem 接口将图片保存至 FruitCollector 相册及应用外部目录，按命名规则生成独立图片文件及批次 JSON 元数据。
+（5）文件存储模块：通过 Capacitor Media 与 Filesystem 接口将图片优先保存至 FruitCollector 相册，并在 Directory.Data 应用私有目录保留副本；fsUtils 模块处理目录已存在等边界情况，按命名规则生成独立图片文件及批次 JSON 元数据。
 
 （6）数据集导出模块：ExportPage 组件提供导出名称输入框与批次选择列表，exportGroups 模块按 batchId 将样本分组为可勾选的数据集；用户可自定义导出名称，勾选需导出的采集批次后，系统将选中样本导出为 JSON 元数据、CSV 表格及 images 图片目录，Android 端可通过系统分享功能发送数据集包。
         """,
@@ -193,9 +255,9 @@ def generate_user_manual() -> Path:
     add_body(
         doc,
         """
-首页顶部为绿色渐变横幅，标题为「热带水果数据集采集器」，副标题说明「连续拍照 · 属性命名 · 一键保存到手机相册目录」。中部为四宫格统计卡片，分别显示已采集样本数、水果种类数、含图片样本数、含定位样本数。下方卡片展示支持采集的热带水果标签及三个快捷按钮：「开始采集新样本」「查看已采集数据」「导出数据集」。底部为固定导航栏，包含首页、采集、数据、导出四个 Tab。
+首页顶部为绿色渐变横幅，标题为「热带水果采集APP」，副标题说明「连续拍照 · 属性命名 · 一键保存到手机相册目录」。中部为四宫格统计卡片，分别显示已采集样本数、水果种类数、含图片样本数、含定位样本数。下方卡片展示支持采集的热带水果标签及三个快捷按钮：「开始采集新样本」「查看已采集数据」「导出数据集」。底部为固定导航栏，包含首页、采集、数据、导出四个 Tab。
 
-图4-2 热带水果数据集采集系统首页
+图4-2 热带水果采集APP首页
         """,
     )
 
@@ -272,17 +334,20 @@ def generate_user_manual() -> Path:
     )
 
     add_heading(doc, "5.5 病害标注说明", 2)
+    add_table_caption(doc, "表3 病害标注选项说明")
+    add_data_table(
+        doc,
+        ["选项", "含义", "适用场景"],
+        [
+            ["未知", "不清楚具体病害类型", "现场无法判断病害名称"],
+            ["上一个病害", "沿用最近一次保存的病害标签", "连续拍摄同一病害样本"],
+            ["健康", "确认无病害", "正常果实对照样本"],
+            ["具体病害名", "如炭疽病、白粉病等", "能明确判断病害类型"],
+        ],
+    )
     add_body(
         doc,
         """
-表3 病害标注选项说明
-
-选项\t含义\t适用场景
-未知\t不清楚具体病害类型\t现场无法判断病害名称
-上一个病害\t沿用最近一次保存的病害标签\t连续拍摄同一病害样本
-健康\t确认无病害\t正常果实对照样本
-具体病害名\t如炭疽病、白粉病等\t能明确判断病害类型
-
 选择水果种类后，系统自动加载该水果的常见病害列表。例如芒果包括：炭疽病、白粉病、疮痂病、细菌性溃疡病、煤烟病、生理性病害、健康；香蕉包括：巴拿马病、叶斑病、黑星病、束顶病、健康等。
 
 图5-5 病害类型选择界面
@@ -290,8 +355,7 @@ def generate_user_manual() -> Path:
     )
 
     out = OUT_DIR / f"{SYSTEM_NAME}-用户手册.docx"
-    doc.save(out)
-    return out
+    return save_doc(doc, out)
 
 
 def generate_design_doc() -> Path:
@@ -309,7 +373,7 @@ def generate_design_doc() -> Path:
         doc,
         """
 课题来源：热带水果种质资源数字化采集与数据集建设
-课题名称：热带水果图像样本移动端采集系统研发
+课题名称：热带水果采集APP研发
 课题编号：（请填写）
         """,
     )
@@ -318,10 +382,10 @@ def generate_design_doc() -> Path:
     add_body(doc, "课题起止时间：2025 年 01 月 01 日——2026 年 12 月 31 日")
 
     doc.add_paragraph()
-    add_heading(doc, "主要完成人及分工", 2)
-
+    add_table_caption(doc, "表1 主要完成人及分工")
     table = doc.add_table(rows=4, cols=2)
     table.style = "Table Grid"
+    table.alignment = WD_ALIGN_PARAGRAPH.CENTER
     rows = [
         ("姓名", "分工"),
         ("（请填写）", "软件总体设计、Android 端集成"),
@@ -331,6 +395,8 @@ def generate_design_doc() -> Path:
     for i, (a, b) in enumerate(rows):
         table.rows[i].cells[0].text = a
         table.rows[i].cells[1].text = b
+        _style_table_cell(table.rows[i].cells[0], bold=(i == 0))
+        _style_table_cell(table.rows[i].cells[1], bold=(i == 0))
 
     doc.add_paragraph()
     p = doc.add_paragraph()
@@ -344,27 +410,29 @@ def generate_design_doc() -> Path:
     add_body(
         doc,
         """
-热带水果数据集采集系统 V1.0 是一款运行于 Android 平台的移动应用软件，包名 com.fruitdata.collector，面向热带水果图像数据集的现场采集、标注、命名、存储与导出场景。软件采用 B/S 架构思想结合 Hybrid App 技术路线，使用 React + TypeScript 实现业务界面，通过 Capacitor 框架封装为原生 APK，调用 Android 相机、文件系统、定位及分享等系统能力。
+热带水果采集APP V1.0 是一款运行于 Android 平台的移动应用软件，包名 com.fruitdata.collector，面向热带水果图像数据集的现场采集、标注、命名、存储与导出场景。软件采用 B/S 架构思想结合 Hybrid App 技术路线，使用 React + TypeScript 实现业务界面，通过 Capacitor 框架封装为原生 APK，调用 Android 相机、文件系统、定位及分享等系统能力。
         """,
     )
 
     add_heading(doc, "二、开发环境与工具", 1)
-    add_body(
+    add_table_caption(doc, "表1 开发环境与工具")
+    add_data_table(
         doc,
-        """
-开发语言：TypeScript、JavaScript、Java、HTML、CSS
-前端框架：React 18、Vite 5
-原生桥接：Capacitor 7（Camera、Filesystem、Geolocation、Share、Media）
-Android 构建：Gradle 8、Android SDK 35
-版本管理：Git、GitHub Actions 云端构建
-        """,
+        ["类别", "说明"],
+        [
+            ["开发语言", "TypeScript、JavaScript、Java、HTML、CSS"],
+            ["前端框架", "React 18、Vite 5"],
+            ["原生桥接", "Capacitor 7（Camera、Filesystem、Geolocation、Share、Media）"],
+            ["Android 构建", "Gradle 8、Android SDK 35"],
+            ["版本管理", "Git、GitHub Actions 云端构建"],
+        ],
     )
 
     add_heading(doc, "三、系统结构设计", 1)
     add_body(
         doc,
         """
-系统分为表现层、业务逻辑层与数据持久层。表现层包括 HomePage、CollectForm、RecordList、RecordDetail、ExportPage 等 React 组件；业务逻辑层包括 disease（病害字典与解析）、naming（命名规则引擎）、fileStorage（手机文件写入与相册保存）、photoUtils（缩略图压缩）、exportGroups（导出批次分组）、export（数据集导出）、storage（本地记录与 lastDisease 缓存）；数据持久层包括浏览器 LocalStorage 应用记录及 Android External 目录原图副本。
+系统分为表现层、业务逻辑层与数据持久层。表现层包括 HomePage、CollectForm、RecordList、RecordDetail、ExportPage 等 React 组件；业务逻辑层包括 disease（病害字典与解析）、naming（命名规则引擎）、fileStorage（相册优先保存与本地副本）、fsUtils（文件系统安全写入）、photoUtils（缩略图压缩）、exportGroups（导出批次分组）、export（数据集导出）、storage（本地记录与 lastDisease 缓存）；数据持久层包括浏览器 LocalStorage 缩略图与元数据，以及 Android Directory.Data 原图副本。
         """,
     )
 
@@ -386,13 +454,12 @@ Android 构建：Gradle 8、Android SDK 35
     add_body(
         doc,
         """
-软件在 Android 10 及以上机型及浏览器环境完成功能测试，覆盖连续拍照、病害标注（含未知/上一个病害）、属性命名、手机存储、列表检索、编辑删除及数据集导出等核心用例。应用安装包通过 GitHub Actions 自动构建，生成 app-debug.apk 供部署测试。
+软件在 Android 10 及以上机型及浏览器环境完成功能测试，覆盖连续拍照、病害标注（含未知/上一个病害）、属性命名、手机存储、列表检索、编辑删除及数据集导出等核心用例。项目内置 E2E 自动化测试（scripts/e2e-test.mjs），验证多图保存与自定义名称导出流程。应用安装包通过 GitHub Actions 自动构建，生成 app-debug.apk 供部署测试。
         """,
     )
 
     out = OUT_DIR / f"{SYSTEM_NAME}-软件设计说明书.docx"
-    doc.save(out)
-    return out
+    return save_doc(doc, out)
 
 
 def main() -> None:

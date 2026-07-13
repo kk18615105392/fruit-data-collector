@@ -52,5 +52,5 @@ export function pickRecordsFromDatasets(
 export function defaultExportName(): string {
   const now = new Date();
   const p = (n: number) => String(n).padStart(2, '0');
-  return `热带水果数据集_${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}`;
+  return `热带水果采集APP_${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}`;
 }

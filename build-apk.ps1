@@ -1,4 +1,4 @@
-# 热带水果采集 App - APK 构建脚本
+# 热带水果采集APP - APK 构建脚本
 # 需要先安装 Android Studio 并配置 ANDROID_HOME
 
 $ErrorActionPreference = "Stop"

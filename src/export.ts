@@ -1,10 +1,21 @@
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import {
+  buildClassList,
+  buildClassificationTargets,
+  buildCocoDataset,
+  labelBaseName,
+  loadImageSize,
+  toDataYaml,
+  toLabelImgXml,
+  toYoloLabelLines,
+  type AnnotationBox,
+} from './annotation';
 import { readPhotoFromSavedPath } from './fileStorage';
 import { mkdirSafe } from './fsUtils';
+import { base64ToU8, createZip, strToU8, type ZipFileEntry } from './zipUtils';
 import type { FruitRecord } from './types';
-
 function dataUrlToBase64(dataUrl: string): string {
   const commaIndex = dataUrl.indexOf(',');
   return commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl;
@@ -35,6 +46,9 @@ export interface ExportMetaItem {
   notes?: string;
   latitude?: number;
   longitude?: number;
+  annotations?: AnnotationBox[];
+  imageWidth?: number;
+  imageHeight?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -86,6 +100,9 @@ export async function buildExportBundle(records: FruitRecord[], datasetName: str
       notes: record.notes,
       latitude: record.latitude,
       longitude: record.longitude,
+      annotations: record.annotations,
+      imageWidth: record.imageWidth,
+      imageHeight: record.imageHeight,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     };
@@ -110,6 +127,124 @@ async function resolveRecordPhoto(record: FruitRecord): Promise<string> {
   return record.photoDataUrl;
 }
 
+async function resolveRecordImageSize(record: FruitRecord, photoDataUrl: string): Promise<{ width: number; height: number }> {
+  if (record.imageWidth && record.imageHeight) {
+    return { width: record.imageWidth, height: record.imageHeight };
+  }
+  return loadImageSize(photoDataUrl);
+}
+
+async function buildAnnotationSidecars(
+  records: FruitRecord[],
+  bundle: ExportBundle,
+  photoUrls: string[],
+): Promise<ZipFileEntry[]> {
+  const classNames = buildClassList(records);
+  if (classNames.length === 0) {
+    return [];
+  }
+  const classMap = new Map(classNames.map((name, index) => [name, index]));
+  const files: ZipFileEntry[] = [
+    { name: 'classes.txt', data: strToU8(classNames.join('\n') + '\n') },
+    { name: 'data.yaml', data: strToU8(toDataYaml(classNames)) },
+  ];
+
+  for (let i = 0; i < records.length; i += 1) {
+    const record = records[i];
+    const meta = bundle.records[i];
+    const boxes = record.annotations ?? [];
+    if (boxes.length === 0) {
+      continue;
+    }
+    const { width, height } = await resolveRecordImageSize(record, photoUrls[i]);
+    const imageName = meta.imageFile.replace(/^images\//, '');
+    const base = labelBaseName(meta.imageFile);
+    files.push({
+      name: `labels/${base}.txt`,
+      data: strToU8(toYoloLabelLines(boxes, classMap) + '\n'),
+    });
+    files.push({
+      name: `annotations/${base}.xml`,
+      data: strToU8(toLabelImgXml(imageName, 'images', width, height, boxes)),
+    });
+  }
+  return files;
+}
+
+const CLASSIFICATION_README = `ImageFolder 分类目录（classification/）
+=====================================
+每个子文件夹名为一个类别，内含属于该类别的图片副本。
+
+类别判定优先级：
+1. 记录中的病害类型
+2. 标注框上的类别名
+3. 水果种类
+
+适用于 PyTorch ImageFolder、TensorFlow image_dataset_from_directory、Keras flow_from_directory 等图像分类训练。
+`;
+
+async function buildCocoSidecar(
+  records: FruitRecord[],
+  bundle: ExportBundle,
+  photoUrls: string[],
+): Promise<ZipFileEntry | null> {
+  const items = [];
+  for (let i = 0; i < records.length; i += 1) {
+    const { width, height } = await resolveRecordImageSize(records[i], photoUrls[i]);
+    items.push({
+      imageFile: bundle.records[i].imageFile,
+      imageWidth: width,
+      imageHeight: height,
+      annotations: records[i].annotations,
+    });
+  }
+  const coco = buildCocoDataset(items, bundle.datasetName);
+  if (coco.images.length === 0) {
+    return null;
+  }
+  return {
+    name: 'coco/annotations.json',
+    data: strToU8(JSON.stringify(coco, null, 2)),
+  };
+}
+
+function buildClassificationSidecars(
+  records: FruitRecord[],
+  bundle: ExportBundle,
+  imageDataList: Uint8Array[],
+): ZipFileEntry[] {
+  const files: ZipFileEntry[] = [
+    { name: 'classification/README.txt', data: strToU8(CLASSIFICATION_README) },
+  ];
+  const added = new Set<string>();
+
+  records.forEach((record, index) => {
+    const meta = bundle.records[index];
+    const imageData = imageDataList[index];
+    if (!imageData) {
+      return;
+    }
+    const targets = buildClassificationTargets(meta.imageFile, record);
+    for (const target of targets) {
+      if (added.has(target.zipPath)) {
+        continue;
+      }
+      added.add(target.zipPath);
+      files.push({ name: target.zipPath, data: imageData });
+    }
+  });
+
+  return files;
+}
+
+function uint8ToBase64(data: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < data.length; i += 1) {
+    binary += String.fromCharCode(data[i]);
+  }
+  return btoa(binary);
+}
+
 export async function exportDatasetNative(options: ExportOptions): Promise<string> {
   const { records, datasetName } = options;
   const safeName = sanitizeExportName(datasetName);
@@ -118,6 +253,64 @@ export async function exportDatasetNative(options: ExportOptions): Promise<strin
 
   await mkdirSafe(folderName, Directory.Cache);
   await mkdirSafe(`${folderName}/images`, Directory.Cache);
+  await mkdirSafe(`${folderName}/labels`, Directory.Cache);
+  await mkdirSafe(`${folderName}/annotations`, Directory.Cache);
+  await mkdirSafe(`${folderName}/coco`, Directory.Cache);
+  await mkdirSafe(`${folderName}/classification`, Directory.Cache);
+
+  const photoUrls: string[] = [];
+  const imageDataList: Uint8Array[] = [];
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i];
+    const meta = bundle.records[i];
+    const photoDataUrl = await resolveRecordPhoto(record);
+    photoUrls.push(photoDataUrl);
+    const imageData = base64ToU8(dataUrlToBase64(photoDataUrl));
+    imageDataList.push(imageData);
+    await Filesystem.writeFile({
+      path: `${folderName}/${meta.imageFile}`,
+      data: dataUrlToBase64(photoDataUrl),
+      directory: Directory.Cache,
+    });
+  }
+
+  const annotationFiles = await buildAnnotationSidecars(records, bundle, photoUrls);
+  for (const file of annotationFiles) {
+    await Filesystem.writeFile({
+      path: `${folderName}/${file.name}`,
+      data: new TextDecoder().decode(file.data),
+      directory: Directory.Cache,
+      encoding: Encoding.UTF8,
+    });
+  }
+
+  const cocoFile = await buildCocoSidecar(records, bundle, photoUrls);
+  if (cocoFile) {
+    await Filesystem.writeFile({
+      path: `${folderName}/${cocoFile.name}`,
+      data: new TextDecoder().decode(cocoFile.data),
+      directory: Directory.Cache,
+      encoding: Encoding.UTF8,
+    });
+  }
+
+  const classificationFiles = buildClassificationSidecars(records, bundle, imageDataList);
+  for (const file of classificationFiles) {
+    if (file.name.endsWith('.txt')) {
+      await Filesystem.writeFile({
+        path: `${folderName}/${file.name}`,
+        data: new TextDecoder().decode(file.data),
+        directory: Directory.Cache,
+        encoding: Encoding.UTF8,
+      });
+    } else {
+      await Filesystem.writeFile({
+        path: `${folderName}/${file.name}`,
+        data: uint8ToBase64(file.data),
+        directory: Directory.Cache,
+      });
+    }
+  }
 
   await Filesystem.writeFile({
     path: `${folderName}/dataset.json`,
@@ -125,17 +318,6 @@ export async function exportDatasetNative(options: ExportOptions): Promise<strin
     directory: Directory.Cache,
     encoding: Encoding.UTF8,
   });
-
-  for (let i = 0; i < records.length; i++) {
-    const record = records[i];
-    const meta = bundle.records[i];
-    const photoDataUrl = await resolveRecordPhoto(record);
-    await Filesystem.writeFile({
-      path: `${folderName}/${meta.imageFile}`,
-      data: dataUrlToBase64(photoDataUrl),
-      directory: Directory.Cache,
-    });
-  }
 
   const csvHeader =
     'id,imageFile,fruitName,category,weight,color,ripeness,disease,notes,latitude,longitude,createdAt,updatedAt';
@@ -173,7 +355,7 @@ export async function exportDatasetNative(options: ExportOptions): Promise<strin
 
   await shareExport({
     title: safeName,
-    text: `已导出「${safeName}」共 ${records.length} 条记录，包含 JSON、CSV 和图片文件`,
+    text: `已导出「${safeName}」共 ${records.length} 条记录，含 YOLO/LabelImg/COCO/分类目录`,
     url: jsonUri.uri,
   });
 
@@ -218,26 +400,69 @@ export async function exportDatasetWeb(options: ExportOptions): Promise<void> {
   const { records, datasetName } = options;
   const safeName = sanitizeExportName(datasetName);
   const bundle = await buildExportBundle(records, safeName);
-  const exportRecords = await Promise.all(
-    bundle.records.map(async (meta, index) => ({
-      ...meta,
-      imageBase64: dataUrlToBase64(await resolveRecordPhoto(records[index])),
-    })),
-  );
-  const exportData = {
-    ...bundle,
-    records: exportRecords,
-  };
+  const zipFiles: ZipFileEntry[] = [
+    { name: 'dataset.json', data: strToU8(JSON.stringify(bundle, null, 2)) },
+    { name: 'dataset.csv', data: strToU8(buildCsvContent(bundle)) },
+  ];
 
-  const blob = new Blob([JSON.stringify(exportData, null, 2)], {
-    type: 'application/json',
-  });
+  const photoUrls: string[] = [];
+  const imageDataList: Uint8Array[] = [];
+  for (let i = 0; i < records.length; i += 1) {
+    const record = records[i];
+    const meta = bundle.records[i];
+    const photoDataUrl = await resolveRecordPhoto(record);
+    photoUrls.push(photoDataUrl);
+    const imageData = base64ToU8(dataUrlToBase64(photoDataUrl));
+    imageDataList.push(imageData);
+    zipFiles.push({
+      name: meta.imageFile,
+      data: imageData,
+    });
+  }
+
+  const annotationFiles = await buildAnnotationSidecars(records, bundle, photoUrls);
+  zipFiles.push(...annotationFiles);
+
+  const cocoFile = await buildCocoSidecar(records, bundle, photoUrls);
+  if (cocoFile) {
+    zipFiles.push(cocoFile);
+  }
+
+  zipFiles.push(...buildClassificationSidecars(records, bundle, imageDataList));
+
+  const zipBuffer = createZip(zipFiles);
+  const blob = new Blob([new Uint8Array(zipBuffer)], { type: 'application/zip' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `${safeName}.json`;
+  anchor.download = `${safeName}.zip`;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+function buildCsvContent(bundle: ExportBundle): string {
+  const csvHeader =
+    'id,imageFile,fruitName,category,weight,color,ripeness,disease,notes,latitude,longitude,createdAt,updatedAt';
+  const csvRows = bundle.records.map((item) =>
+    [
+      item.id,
+      item.imageFile,
+      item.fruitName,
+      item.category,
+      item.weight ?? '',
+      item.color ?? '',
+      item.ripeness ?? '',
+      item.disease ?? '',
+      (item.notes ?? '').replace(/"/g, '""'),
+      item.latitude ?? '',
+      item.longitude ?? '',
+      item.createdAt,
+      item.updatedAt,
+    ]
+      .map((v) => `"${String(v)}"`)
+      .join(','),
+  );
+  return [csvHeader, ...csvRows].join('\n');
 }
 
 export async function exportDataset(options: ExportOptions): Promise<void> {
@@ -260,9 +485,15 @@ export async function exportDataset(options: ExportOptions): Promise<void> {
 }
 
 export async function takePhoto(source: 'prompt' | 'camera' = 'prompt'): Promise<string> {
-  const e2ePhoto = (globalThis as { __E2E_PHOTO_URL__?: string }).__E2E_PHOTO_URL__;
-  if (e2ePhoto) {
-    return e2ePhoto;
+  const e2e = globalThis as { __E2E_PHOTO_URL__?: string; __E2E_PHOTO_QUEUE__?: string[] };
+  if (e2e.__E2E_PHOTO_QUEUE__ && e2e.__E2E_PHOTO_QUEUE__.length > 0) {
+    const next = e2e.__E2E_PHOTO_QUEUE__.shift();
+    if (next) {
+      return next;
+    }
+  }
+  if (e2e.__E2E_PHOTO_URL__) {
+    return e2e.__E2E_PHOTO_URL__;
   }
 
   const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera');

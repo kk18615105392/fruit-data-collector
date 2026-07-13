@@ -17,6 +17,15 @@ export interface NamingSettings {
   separator: string;
 }
 
+export interface AnnotationBox {
+  id: string;
+  className: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface FruitRecord {
   id: string;
   fruitName: string;
@@ -32,11 +41,14 @@ export interface FruitRecord {
   latitude?: number;
   longitude?: number;
   batchId?: string;
+  annotations?: AnnotationBox[];
+  imageWidth?: number;
+  imageHeight?: number;
   createdAt: string;
   updatedAt: string;
 }
 
-export type TabId = 'home' | 'collect' | 'list' | 'export';
+export type TabId = 'home' | 'collect' | 'detect' | 'list' | 'export';
 
 export interface FruitFormData {
   fruitName: string;
@@ -57,6 +69,9 @@ export interface SessionPhoto {
   dataUrl: string;
   fileName: string;
   index: number;
+  annotations?: AnnotationBox[];
+  imageWidth?: number;
+  imageHeight?: number;
 }
 
 export const EMPTY_FORM: FruitFormData = {

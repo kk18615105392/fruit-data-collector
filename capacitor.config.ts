@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.fruitdata.collector',
-  appName: '热带水果采集',
+  appName: '热带水果采集APP',
   webDir: 'dist',
   android: {
     allowMixedContent: true,

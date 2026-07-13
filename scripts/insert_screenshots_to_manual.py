@@ -12,7 +12,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "data" / "软著材料"
 SCREEN_DIR = OUT_DIR / "screenshots"
-MANUAL_PATH = OUT_DIR / "热带水果数据集采集系统-用户手册.docx"
+MANUAL_PATH = OUT_DIR / "热带水果采集APP-用户手册.docx"
 
 # Word 中图片最大宽度/高度（厘米）
 MAX_WIDTH_CM = 9.0
@@ -100,11 +100,11 @@ def insert_figures() -> None:
         inserted.add(fig_key)
         print(f"已插入 {fig_key} <- {img_name} ({w_cm:.1f}x{h_cm:.1f} cm)")
 
-    out_path = OUT_DIR / "热带水果数据集采集系统-用户手册-含截图.docx"
+    out_path = OUT_DIR / "热带水果采集APP-用户手册-含截图.docx"
     try:
         doc.save(str(out_path))
     except PermissionError:
-        out_path = OUT_DIR / "热带水果数据集采集系统-用户手册-含截图-更新.docx"
+        out_path = OUT_DIR / "热带水果采集APP-用户手册-含截图-更新.docx"
         doc.save(str(out_path))
         print("原文件被占用，已另存为新文件。")
     print(f"\n已保存: {out_path}")

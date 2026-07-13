@@ -1,6 +1,7 @@
 node_modules/
 dist/
 ios/
+miniprogram/
 .DS_Store
 *.log
 .env
@@ -9,6 +10,16 @@ ios/
 .vscode/
 *.apk
 *.aab
+
+models/tomato-disease/.cache/
+models/tomato-disease/*.pt
+models/plant-disease/**/*.pt
+models/fruit-specific/*.pt
+!models/**/README.md
+
+# 超大 ONNX（番茄 s）可不提交；轻量模型提交到 miniprogram/models
+models/tomato-disease/*-320.onnx
+models/tomato-disease/*.onnx
 
 # Android 构建缓存（android 源码需要提交）
 android/.gradle/
